@@ -1,12 +1,17 @@
 """Authentication utilities for D365 F&O client."""
 
+import asyncio
+import logging
 from datetime import datetime
 from typing import Optional, Union
 
 from azure.identity import ClientSecretCredential, DefaultAzureCredential
 
-from .credential_sources import CredentialManager, CredentialSource
+from .credential_sources import CredentialManager
+from .exceptions import AuthenticationError
 from .models import FOClientConfig
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationManager:
@@ -45,7 +50,9 @@ class AuthenticationManager:
                 )
                 return
             except Exception as e:
-                raise ValueError(f"Failed to setup credentials from source: {e}")
+                raise AuthenticationError(
+                    f"Failed to setup credentials from source: {e}"
+                ) from e
 
         # Fallback to existing logic for backward compatibility
 
@@ -66,7 +73,7 @@ class AuthenticationManager:
             await self._setup_credentials()
 
         if self.credential is None:
-            raise ValueError("Authentication credentials are not set up.")
+            raise AuthenticationError("Authentication credentials are not set up.")
 
         if (
             self._token
@@ -75,24 +82,20 @@ class AuthenticationManager:
         ):
             return self._token
 
-        # Try different scopes
-        scopes_to_try = [
-            f"{self.config.base_url.rstrip('/')}/.default",
-        ]
+        scope = f"{self.config.base_url.rstrip('/')}/.default"
+        try:
+            # azure.identity credentials are synchronous; run the token request
+            # in a worker thread so it doesn't block the event loop.
+            token = await asyncio.to_thread(self.credential.get_token, scope)
+        except Exception as e:
+            logger.error(f"Failed to get token with scope {scope}: {e}")
+            raise AuthenticationError(
+                f"Failed to get authentication token for scope {scope}: {e}"
+            ) from e
 
-        for scope in scopes_to_try:
-            if not scope:
-                continue
-            try:
-                token = self.credential.get_token(scope)
-                self._token = token.token
-                self._token_expires = token.expires_on
-                return self._token
-            except Exception as e:
-                print(f"Failed to get token with scope {scope}: {e}")
-                continue
-
-        raise Exception("Failed to get authentication token")
+        self._token = token.token
+        self._token_expires = token.expires_on
+        return self._token
 
     def _is_localhost(self) -> bool:
         """Check if the base URL is localhost (for mock testing)

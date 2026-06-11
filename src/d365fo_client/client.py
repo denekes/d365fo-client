@@ -66,7 +66,11 @@ class FOClient:
         self.sync_manager = None
         self._sync_session_manager = None
         self._metadata_initialized = False
+        self._metadata_init_lock = asyncio.Lock()
         self._background_sync_task = None
+        # Strong references to fire-and-forget tasks so they aren't
+        # garbage-collected mid-flight and their exceptions get logged.
+        self._background_tasks: set = set()
 
         # Initialize operations
         self.metadata_url = f"{config.base_url.rstrip('/')}/Metadata"
@@ -88,16 +92,50 @@ class FOClient:
             except asyncio.CancelledError:
                 pass
 
+        # Cancel any remaining fire-and-forget tasks
+        for task in list(self._background_tasks):
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
         await self.session_manager.close()
+
+    def _spawn_background_task(self, coro) -> asyncio.Task:
+        """Create a supervised fire-and-forget task.
+
+        Keeps a strong reference until completion and logs any exception,
+        so background failures are never silently dropped.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        return task
+
+    def _on_background_task_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc:
+                self.logger.error(f"Background task failed: {exc}")
 
     async def initialize_metadata(self):
         await self._ensure_metadata_initialized()
 
     async def _ensure_metadata_initialized(self):
         """Ensure metadata cache and sync manager are initialized"""
-        if not self._metadata_initialized and self.config.enable_metadata_cache:
-            try:
+        if self._metadata_initialized or not self.config.enable_metadata_cache:
+            return
 
+        async with self._metadata_init_lock:
+            # Re-check under the lock: another coroutine may have finished
+            # (or failed and disabled the cache) while we were waiting.
+            if self._metadata_initialized or not self.config.enable_metadata_cache:
+                return
+
+            try:
                 cache_dir = Path(
                     self.config.metadata_cache_dir or get_default_cache_directory()
                 )
@@ -107,7 +145,6 @@ class FOClient:
                     cache_dir, self.config.base_url, self.metadata_api_ops
                 )
                 # Initialize label operations v2 with cache support
-
                 self.label_ops.set_label_cache(self.metadata_cache)
 
                 await self.metadata_cache.initialize()
@@ -148,7 +185,7 @@ class FOClient:
 
             if sync_needed and global_version_id:
                 # Start sync in background without awaiting it
-                self._background_sync_task = asyncio.create_task(
+                self._background_sync_task = self._spawn_background_task(
                     self._background_sync_worker(global_version_id)
                 )
                 self.logger.debug("Background metadata sync triggered")
@@ -224,58 +261,44 @@ class FOClient:
         if use_cache_first is None:
             use_cache_first = self.config.use_cache_first
 
+        async def call(method, *m_args, **m_kwargs):
+            result = method(*m_args, **m_kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return result
+
         # If cache-first is disabled, metadata cache is disabled, or background sync is running, go straight to fallback
         if (
             not use_cache_first
             or not self.config.enable_metadata_cache
             or self._is_background_sync_running()
         ):
-            return (
-                await fallback_method(*args, **kwargs)
-                if asyncio.iscoroutinefunction(fallback_method)
-                else fallback_method(*args, **kwargs)
-            )
+            return await call(fallback_method, *args, **kwargs)
 
         # Ensure metadata is initialized
         await self._ensure_metadata_initialized()
 
         if not self._metadata_initialized:
             # Cache not available, use fallback
-            return (
-                await fallback_method(*args, **kwargs)
-                if asyncio.iscoroutinefunction(fallback_method)
-                else fallback_method(*args, **kwargs)
-            )
+            return await call(fallback_method, *args, **kwargs)
 
         try:
             # Try cache first
-            result = (
-                await cache_method(*args, **kwargs)
-                if asyncio.iscoroutinefunction(cache_method)
-                else cache_method(*args, **kwargs)
-            )
+            result = await call(cache_method, *args, **kwargs)
 
             # If cache returns empty result, trigger sync and try fallback
             if not result or (isinstance(result, list) and len(result) == 0):
                 # Trigger background sync without awaiting (fire-and-forget)
-                asyncio.create_task(self._trigger_background_sync_if_needed())
-                return (
-                    await fallback_method(*args, **kwargs)
-                    if asyncio.iscoroutinefunction(fallback_method)
-                    else fallback_method(*args, **kwargs)
-                )
+                self._spawn_background_task(self._trigger_background_sync_if_needed())
+                return await call(fallback_method, *args, **kwargs)
 
             return result
 
         except Exception as e:
             self.logger.warning(f"Cache lookup failed, using fallback: {e}")
             # Trigger sync if cache failed (fire-and-forget)
-            asyncio.create_task(self._trigger_background_sync_if_needed())
-            return (
-                await fallback_method(*args, **kwargs)
-                if asyncio.iscoroutinefunction(fallback_method)
-                else fallback_method(*args, **kwargs)
-            )
+            self._spawn_background_task(self._trigger_background_sync_if_needed())
+            return await call(fallback_method, *args, **kwargs)
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -301,7 +324,7 @@ class FOClient:
             async with session.get(url, headers=tracing) as response:
                 return response.status == 200
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            self.logger.warning(f"Connection test failed: {e}")
             return False
 
     async def test_metadata_connection(self) -> bool:
@@ -319,11 +342,10 @@ class FOClient:
             params = {"$top": 1}
 
             async with session.get(url, params=params, headers=tracing) as response:
-                if response.status == 200:
-                    return True
+                return response.status == 200
 
         except Exception as e:
-            print(f"Metadata connection test failed: {e}")
+            self.logger.warning(f"Metadata connection test failed: {e}")
             return False
 
     # Metadata Operations
@@ -1178,53 +1200,24 @@ class FOClient:
         if hasattr(self.metadata_cache, "get_label_cache_statistics"):
             # Using v2 cache with label support
             try:
-                import asyncio
-
-                # Always check if we're in an async context first
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop: safe to run the async version synchronously
                 try:
-                    loop = asyncio.get_running_loop()
-                    # We're in an async context, can't run async code synchronously
-                    return {
-                        "enabled": True,
-                        "cache_type": "metadata_v2",
-                        "message": "Label caching enabled with v2 cache (statistics available via async method)",
-                    }
-                except RuntimeError:
-                    # No running loop, we can safely create one
-                    pass
-
-                # Create a new event loop for synchronous execution
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        stats = loop.run_until_complete(
-                            self.metadata_cache.get_label_cache_statistics()
-                        )
-                        return {
-                            "enabled": True,
-                            "cache_type": "metadata_v2",
-                            "statistics": stats,
-                        }
-                    finally:
-                        loop.close()
-                        # Remove the loop to clean up
-                        try:
-                            asyncio.set_event_loop(None)
-                        except:
-                            pass
+                    return asyncio.run(self.get_label_cache_info_async())
                 except Exception as e:
                     return {
                         "enabled": True,
                         "cache_type": "metadata_v2",
                         "error": f"Error getting statistics: {e}",
                     }
-            except Exception as e:
-                return {
-                    "enabled": True,
-                    "cache_type": "metadata_v2",
-                    "error": f"Error getting statistics: {e}",
-                }
+
+            # We're inside an async context; statistics require the async API
+            return {
+                "enabled": True,
+                "cache_type": "metadata_v2",
+                "message": "Label caching enabled with v2 cache (statistics available via async method)",
+            }
         else:
             # Legacy cache or no label caching
             return {
@@ -1428,12 +1421,18 @@ class FOClient:
             async with session.post(url, json=body, headers=headers) as response:
                 status_code = response.status
                 activity_id = response.headers.get("ms-dyn-aid")
-                server_timing_ms = _parse_server_timing(response.headers.get("server-timing"))
+                server_timing_ms = _parse_server_timing(
+                    response.headers.get("server-timing")
+                )
                 request_id = headers.get("x-ms-client-request-id")
                 if activity_id or server_timing_ms is not None:
                     self.logger.debug(
                         "JSON service %s/%s/%s: x-ms-client-request-id=%s ms-dyn-aid=%s server-timing=%sms",
-                        service_group, service_name, operation_name, request_id, activity_id or "n/a",
+                        service_group,
+                        service_name,
+                        operation_name,
+                        request_id,
+                        activity_id or "n/a",
                         server_timing_ms if server_timing_ms is not None else "n/a",
                     )
 

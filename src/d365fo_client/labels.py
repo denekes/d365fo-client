@@ -97,10 +97,12 @@ class LabelOperations:
 
                     return label_text
                 else:
-                    print(f"Error fetching label {label_id}: {response.status}")
+                    logger.warning(
+                        f"Error fetching label {label_id}: HTTP {response.status}"
+                    )
 
         except Exception as e:
-            print(f"Exception fetching label {label_id}: {e}")
+            logger.warning(f"Exception fetching label {label_id}: {e}")
 
         return None
 
@@ -156,10 +158,12 @@ class LabelOperations:
                                 )
                             )
                         else:
-                            print(f"Error fetching label {label_id}: {response.status}")
+                            logger.warning(
+                                f"Error fetching label {label_id}: HTTP {response.status}"
+                            )
 
                 except Exception as e:
-                    print(f"Exception fetching label {label_id}: {e}")
+                    logger.warning(f"Exception fetching label {label_id}: {e}")
 
             # Batch cache all fetched labels
             if fetched_labels and self.label_cache:

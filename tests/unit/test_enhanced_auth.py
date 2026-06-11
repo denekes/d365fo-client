@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from d365fo_client.auth import AuthenticationManager
+from d365fo_client.exceptions import AuthenticationError
 from d365fo_client.credential_sources import (
     EnvironmentCredentialSource,
     KeyVaultCredentialSource,
@@ -128,7 +129,7 @@ class TestEnhancedAuthenticationManager:
             side_effect=ValueError("Environment variables not found")
         )
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(AuthenticationError) as exc_info:
             await auth_manager._setup_credentials()
 
         assert "Failed to setup credentials from source" in str(exc_info.value)

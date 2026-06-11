@@ -3,7 +3,6 @@
 import argparse
 import logging
 import os
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -55,7 +54,7 @@ class ConfigManager:
             return config
         except Exception as e:
             # If config file is corrupted, return empty config
-            print(f"Warning: Could not load config file {self.config_path}: {e}")
+            logger.warning(f"Could not load config file {self.config_path}: {e}")
             return {"profiles": {}, "default_profile": None, "global": {}}
 
     def _save_config(self) -> None:
@@ -67,7 +66,7 @@ class ConfigManager:
                     self._config_data, f, default_flow_style=False, allow_unicode=True
                 )
         except Exception as e:
-            print(f"Error saving config file {self.config_path}: {e}")
+            logger.error(f"Error saving config file {self.config_path}: {e}")
 
     def reload_config(self) -> None:
         """Reload configuration from file.
@@ -256,7 +255,12 @@ class ConfigManager:
         for env_var, param_name in env_mappings.items():
             env_value = os.getenv(env_var)
             if env_value:
-                if param_name in ["verify_ssl", "use_label_cache", "use_cache_first", "enable_request_tracing"]:
+                if param_name in [
+                    "verify_ssl",
+                    "use_label_cache",
+                    "use_cache_first",
+                    "enable_request_tracing",
+                ]:
                     # Convert to boolean
                     config_params[param_name] = env_value.lower() in (
                         "true",
