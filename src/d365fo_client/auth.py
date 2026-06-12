@@ -1,7 +1,6 @@
 """Authentication utilities for D365 F&O client."""
 
 import asyncio
-import logging
 from datetime import datetime
 from typing import Optional, Union
 
@@ -10,8 +9,6 @@ from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from .credential_sources import CredentialManager
 from .exceptions import AuthenticationError
 from .models import FOClientConfig
-
-logger = logging.getLogger(__name__)
 
 
 class AuthenticationManager:
@@ -88,7 +85,6 @@ class AuthenticationManager:
             # in a worker thread so it doesn't block the event loop.
             token = await asyncio.to_thread(self.credential.get_token, scope)
         except Exception as e:
-            logger.error(f"Failed to get token with scope {scope}: {e}")
             raise AuthenticationError(
                 f"Failed to get authentication token for scope {scope}: {e}"
             ) from e

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING — Authentication error types**: `AuthenticationManager` now raises
+  `d365fo_client.exceptions.AuthenticationError` instead of `ValueError`
+  (credential setup failures) and bare `Exception` (token acquisition
+  failures). Callers catching the old types should catch
+  `AuthenticationError` (or its base class `FOClientError`) instead.
+- Token acquisition no longer blocks the event loop: the synchronous
+  `azure.identity` `get_token` call now runs in a worker thread.
+- Library modules (`auth`, `labels`, `config`, `client` connection tests) now
+  log errors via the `logging` module instead of printing to stdout.
+
+### Fixed
+- `FOClient.test_metadata_connection()` returned `None` instead of `False` on
+  non-200 responses.
+- Metadata cache initialization is now guarded by an `asyncio.Lock`,
+  preventing concurrent double-initialization.
+- Fire-and-forget background sync tasks are now supervised: strong references
+  prevent mid-flight garbage collection, exceptions are logged, and pending
+  tasks are cancelled on `close()`.
+
+### Removed
+- Deleted dead `d365fo_client/mcp/main.py` entry point (it imported the
+  previously removed `D365FOMCPServer` class and was referenced by no console
+  script; both `d365fo-mcp-server` and `d365fo-fastmcp-server` point to
+  `fastmcp_main`).
+
 ## [0.3.7] - 2026-04-18
 
 ### Added

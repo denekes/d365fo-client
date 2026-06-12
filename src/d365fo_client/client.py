@@ -84,15 +84,8 @@ class FOClient:
 
     async def close(self):
         """Close the client session"""
-        # Cancel background sync task if running
-        if self._background_sync_task and not self._background_sync_task.done():
-            self._background_sync_task.cancel()
-            try:
-                await self._background_sync_task
-            except asyncio.CancelledError:
-                pass
-
-        # Cancel any remaining fire-and-forget tasks
+        # Cancel all supervised background tasks (includes the sync task,
+        # which _spawn_background_task added to this set)
         for task in list(self._background_tasks):
             if not task.done():
                 task.cancel()
