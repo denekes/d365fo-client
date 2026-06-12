@@ -296,8 +296,10 @@ const TitleScene = {
     }
     ctx.fillStyle = '#100e1e';
     ctx.fillRect(0, 760, W, H - 760);
-    // crown emblem with glow
+    // crown emblem haloed in god rays
     const pulse = 1 + Math.sin(gTime * 2) * 0.04;
+    sunRays(W / 2, 300, 270, '#ffd75e', 0.09, 13, 0.03);
+    glow(W / 2, 300, 200, 'rgba(255,210,110,0.55)', 0.7);
     ctx.save();
     ctx.shadowColor = 'rgba(255,210,90,0.8)';
     ctx.shadowBlur = 40 * pulse;
@@ -520,7 +522,10 @@ const MapScene = {
   render(dt) {
     this.drawSea();
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
+    this.drawCloudShadows();
     this.drawBanners();
+    this.drawFrame();
+    vignette(0.3);
     this.drawHUD();
     if (this.selected >= 0) this.drawInfo();
     this.drawBottomBar();
@@ -533,9 +538,27 @@ const MapScene = {
   },
 
   drawSea() {
-    ctx.fillStyle = skyGradient(MAPY, MAPY + MAPH, '#27506e', '#16334c');
+    // deep water with a warm sun-glint band
+    const g = ctx.createLinearGradient(0, MAPY, 0, MAPY + MAPH);
+    g.addColorStop(0, '#1d3b58');
+    g.addColorStop(0.45, '#27506e');
+    g.addColorStop(1, '#122a42');
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(220,240,255,0.12)';
+    glow(560, MAPY + 180, 320, 'rgba(255,214,140,0.35)', 0.5);
+    if (!this.glints) {
+      const rg = mulberry32(99);
+      this.glints = Array.from({ length: 60 }, () => ({
+        x: 380 + rg() * 330, y: MAPY + 40 + rg() * 320, p: rg() * TAU,
+      }));
+    }
+    for (const s of this.glints) {
+      if (MapGen.terrAt(s.x, s.y) >= 0) continue;
+      const a = Math.max(0, Math.sin(gTime * 1.6 + s.p));
+      ctx.fillStyle = `rgba(255,235,190,${a * 0.5})`;
+      ctx.fillRect(s.x, s.y, 3, 2);
+    }
+    ctx.strokeStyle = 'rgba(220,240,255,0.1)';
     ctx.lineWidth = 2;
     for (let i = 0; i < 9; i++) {
       const y = MAPY + 60 + i * 110;
@@ -546,6 +569,9 @@ const MapScene = {
       }
       ctx.stroke();
     }
+    ctx.globalAlpha = 0.45 + 0.2 * Math.sin(gTime * 1.1);
+    ctx.drawImage(MapGen.foamCanvas, 0, MAPY);
+    ctx.globalAlpha = 1;
     for (const sh of this.ships) {
       if (MapGen.terrAt(sh.x, sh.y) >= 0) continue; // don't sail over land
       const bob = Math.sin(gTime * 2 + sh.x) * 3;
@@ -562,6 +588,70 @@ const MapScene = {
       ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(12, -6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
       ctx.restore();
     }
+  },
+
+  drawCloudShadows() {
+    ctx.fillStyle = 'rgba(12,22,42,0.085)';
+    for (let i = 0; i < 3; i++) {
+      const x = ((gTime * (7 + i * 3) + i * 320) % (W + 520)) - 260;
+      const y = MAPY + 180 + i * 290;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 190, 80, 0.3, 0, TAU);
+      ctx.ellipse(x + 120, y + 40, 120, 55, -0.2, 0, TAU);
+      ctx.fill();
+    }
+  },
+
+  drawFrame() {
+    // chart border
+    ctx.strokeStyle = 'rgba(201,164,74,0.75)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(8, MAPY - 2, W - 16, MAPH + 4);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(232,216,168,0.45)';
+    ctx.strokeRect(16, MAPY + 6, W - 32, MAPH - 12);
+    for (const [cx, cy] of [[8, MAPY - 2], [W - 8, MAPY - 2], [8, MAPY + MAPH + 2], [W - 8, MAPY + MAPH + 2]]) {
+      ctx.fillStyle = '#c9a44a';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 11); ctx.lineTo(cx + 11, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 11, cy);
+      ctx.closePath(); ctx.fill();
+    }
+    // compass rose in the western sea
+    const rx = 80, ry = MAPY + 150;
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = '#e8d8a8';
+    ctx.fillStyle = '#e8d8a8';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(rx, ry, 34, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rx, ry, 25, 0, TAU); ctx.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = i * TAU / 8, len = i % 2 ? 18 : 33;
+      ctx.beginPath();
+      ctx.moveTo(rx + Math.cos(a) * 6, ry + Math.sin(a) * 6);
+      ctx.lineTo(rx + Math.cos(a) * len, ry + Math.sin(a) * len);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(rx, ry - 46); ctx.lineTo(rx + 7, ry - 28); ctx.lineTo(rx - 7, ry - 28);
+    ctx.closePath(); ctx.fill();
+    text('N', rx, ry - 58, 20, '#e8d8a8');
+    ctx.restore();
+    // a serpent in the southern sea
+    const sx = 600, sy = MAPY + 905;
+    ctx.strokeStyle = 'rgba(180,220,210,0.5)';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(sx + i * 34, sy, 14, Math.PI + 0.4, TAU - 0.4, i % 2 === 1);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(sx - 22, sy - 2);
+    ctx.lineTo(sx - 36, sy - 18 + Math.sin(gTime * 2) * 2);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
   },
 
   drawBanners() {
@@ -798,12 +888,34 @@ const BattleScene = {
     });
   },
   render() {
-    // field at dawn
-    ctx.fillStyle = skyGradient(0, 560, '#7e5a6e', '#d8a070');
+    // golden-hour battlefield
+    const sky = ctx.createLinearGradient(0, 0, 0, 560);
+    sky.addColorStop(0, '#503a5e');
+    sky.addColorStop(0.55, '#b86850');
+    sky.addColorStop(1, '#f0c080');
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, 560);
-    ctx.fillStyle = 'rgba(255,230,180,0.85)';
-    ctx.beginPath(); ctx.arc(W / 2, 520, 60, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#3c5232';
+    sunRays(W / 2, 505, 360, '#ffe0a8', 0.12, 12, 0.03);
+    glow(W / 2, 505, 220, 'rgba(255,222,150,0.9)', 0.85);
+    ctx.fillStyle = '#fff0cc';
+    ctx.beginPath(); ctx.arc(W / 2, 510, 64, 0, TAU); ctx.fill();
+    // rooks wheeling over the field
+    ctx.strokeStyle = 'rgba(30,22,30,0.7)';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 4; i++) {
+      const bx = ((gTime * (26 + i * 7) + i * 260) % (W + 160)) - 80;
+      const by = 130 + i * 52 + Math.sin(gTime * 2 + i) * 12;
+      const fl = Math.sin(gTime * 7 + i * 2) * 6;
+      ctx.beginPath();
+      ctx.moveTo(bx - 9, by - fl);
+      ctx.quadraticCurveTo(bx, by + 4, bx + 9, by - fl);
+      ctx.stroke();
+    }
+    const ground = ctx.createLinearGradient(0, 540, 0, H);
+    ground.addColorStop(0, '#4c6638');
+    ground.addColorStop(0.5, '#3c5232');
+    ground.addColorStop(1, '#283c24');
+    ctx.fillStyle = ground;
     ctx.fillRect(0, 540, W, H - 540);
     ctx.fillStyle = '#46603a';
     ctx.beginPath();
@@ -811,6 +923,14 @@ const BattleScene = {
     for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 548 + fnoise(x * 0.01, 8.1) * 26);
     ctx.lineTo(W, 620); ctx.lineTo(0, 620);
     ctx.closePath(); ctx.fill();
+    // haze rolling over the distant field
+    ctx.fillStyle = 'rgba(240,200,140,0.12)';
+    for (let i = 0; i < 2; i++) {
+      const hx = ((gTime * (11 + i * 6)) % (W + 600)) - 300;
+      ctx.beginPath();
+      ctx.ellipse(hx, 580 + i * 26, 280, 26, 0, 0, TAU);
+      ctx.fill();
+    }
     if (this.t.castle > 0) {
       drawCastleSilhouette(560, 545, 0.9, '#564a3a');
       if (this.breach > 0) {
@@ -830,6 +950,7 @@ const BattleScene = {
     panel(W - 340, 20, 320, 96, { r: 12 });
     text('Defenders', W - 300, 50, 22, '#f5e9c8', 'left');
     textShadow(`${v.dg} ⚔`, W - 300, 86, 27, '#ffd0c0', 'left');
+    vignette(0.42);
     if (this.phase === 'stance') text('Choose your tactics...', W / 2, 1180, 26, '#e8d8b0');
     else textShadow(`The Battle of ${this.t.name}`, W / 2, 1180, 30, '#ffd75e');
   },
@@ -940,7 +1061,21 @@ const JoustScene = {
     else if (d > -3.4) { this.scoreF += 1; this.resultMsg = 'His lance splinters against you!'; Sfx.clash(); shake = 7; }
     else { this.scoreF += 3; this.pWins = false; this.resultMsg = 'You are thrown from the saddle!'; Sfx.crack(); shake = 12; buzz(120); }
     burst(W / 2, 930, 22, { color: '#e8d8a8', spMax: 260, up: 80 });
-    if (Math.abs(d) > 3.4) burst(W / 2, 930, 16, { color: '#caa', spMax: 200 });
+    if (Math.abs(d) > 3.4) {
+      slowMo(0.22, 0.55);
+      burst(W / 2, 930, 16, { color: '#caa', spMax: 200 });
+    } else if (Math.abs(d) > 0.8) {
+      slowMo(0.4, 0.3);
+    }
+    if (this.pWins === true) {
+      for (let i = 0; i < 36; i++) {
+        spawn(rnd(60, W - 60), rnd(260, 330), {
+          vx: rnd(-40, 40), vy: rnd(20, 90), g: 60, life: rnd(1.2, 2.2),
+          size: rnd(4, 7), color: pick(['#ffd75e', '#e85a4a', '#7ac0e8', '#a8e87a', '#e8a8d8']),
+          shrink: false,
+        });
+      }
+    }
   },
   afterPass() {
     if (this.pass >= 3 && this.scoreP !== this.scoreF) { this.finish(); return; }
@@ -983,32 +1118,60 @@ const JoustScene = {
     });
   },
   render() {
-    // afternoon sky
-    ctx.fillStyle = skyGradient(0, 600, '#6fa3d0', '#cfe0e8');
-    ctx.fillRect(0, 0, W, 600);
-    // clouds
+    // late-afternoon sky burning toward sunset
+    const sky = ctx.createLinearGradient(0, 0, 0, 470);
+    sky.addColorStop(0, '#31406e');
+    sky.addColorStop(0.55, '#a05a68');
+    sky.addColorStop(1, '#eeb070');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, 470);
+    sunRays(140, 215, 280, '#ffd9a0', 0.1, 11, 0.04);
+    glow(140, 215, 170, 'rgba(255,210,140,0.85)', 0.8);
+    ctx.fillStyle = '#ffeac0';
+    ctx.beginPath(); ctx.arc(140, 215, 38, 0, TAU); ctx.fill();
+    // warm clouds
     for (let i = 0; i < 4; i++) {
       const cx = ((gTime * 9 + i * 210) % (W + 240)) - 120;
-      const cy = 90 + i * 55;
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      const cy = 80 + i * 48;
+      ctx.fillStyle = `rgba(255,224,200,${0.5 - i * 0.07})`;
       for (const [ox, oy, r] of [[0, 0, 34], [30, 6, 26], [-30, 8, 24]]) {
         ctx.beginPath(); ctx.arc(cx + ox, cy + oy, r, 0, TAU); ctx.fill();
       }
     }
-    drawCastleSilhouette(120, 330, 0.65, 'rgba(90,80,100,0.7)');
-    // grandstand
-    ctx.fillStyle = '#6a4a2a';
-    ctx.fillRect(0, 320, W, 130);
-    ctx.fillStyle = '#54381e';
-    ctx.fillRect(0, 300, W, 26);
+    // hazy hills, far to near
+    ctx.fillStyle = 'rgba(110,90,130,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(0, 320);
+    for (let x = 0; x <= W; x += 40) ctx.lineTo(x, 296 + fnoise(x * 0.004, 1.1) * 52);
+    ctx.lineTo(W, 470); ctx.lineTo(0, 470);
+    ctx.closePath(); ctx.fill();
+    drawCastleSilhouette(580, 322, 0.7, 'rgba(74,60,92,0.85)');
+    ctx.fillStyle = 'rgba(86,74,98,0.8)';
+    ctx.beginPath();
+    ctx.moveTo(0, 360);
+    for (let x = 0; x <= W; x += 36) ctx.lineTo(x, 342 + fnoise(x * 0.006, 6.4) * 40);
+    ctx.lineTo(W, 470); ctx.lineTo(0, 470);
+    ctx.closePath(); ctx.fill();
+    // grandstand with a striped canopy
+    ctx.fillStyle = '#5e4226';
+    ctx.fillRect(0, 332, W, 118);
+    for (let i = 0; i * 48 < W; i++) {
+      ctx.fillStyle = i % 2 ? '#b8413a' : '#e8dcc2';
+      ctx.fillRect(i * 48, 296, 48, 30);
+      ctx.beginPath();
+      ctx.arc(i * 48 + 24, 326, 24, 0, Math.PI);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(40,26,14,0.35)';
+    ctx.fillRect(0, 332, W, 16);
     for (let i = 0; i < 12; i++) {
       const fx = 30 + i * 62;
       ctx.fillStyle = i % 2 ? player().color : this.foe.color;
       ctx.beginPath();
-      ctx.moveTo(fx, 250); ctx.lineTo(fx + 20, 258 + Math.sin(gTime * 3 + i) * 3); ctx.lineTo(fx, 268);
+      ctx.moveTo(fx, 242); ctx.lineTo(fx + 20, 250 + Math.sin(gTime * 3 + i) * 3); ctx.lineTo(fx, 260);
       ctx.closePath(); ctx.fill();
       ctx.strokeStyle = '#3a2c1c'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(fx, 245); ctx.lineTo(fx, 300); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(fx, 238); ctx.lineTo(fx, 296); ctx.stroke();
     }
     const cheer = this.phase === 'impact' ? 6 : 1.5;
     for (const c of this.crowd) {
@@ -1017,13 +1180,29 @@ const JoustScene = {
       ctx.arc(c.x, c.y + Math.sin(gTime * 6 + c.p) * cheer, 8, 0, TAU);
       ctx.fill();
     }
-    // field
-    ctx.fillStyle = '#5a7a42';
+    // torch-lit field
+    const grass = ctx.createLinearGradient(0, 450, 0, H);
+    grass.addColorStop(0, '#6a8848');
+    grass.addColorStop(0.5, '#55703c');
+    grass.addColorStop(1, '#3a5230');
+    ctx.fillStyle = grass;
     ctx.fillRect(0, 450, W, H - 450);
+    ctx.fillStyle = 'rgba(255,236,190,0.05)';
+    for (let i = 0; i < 5; i++) ctx.fillRect(0, 490 + i * 150, W, 60);
+    // the tilt barrier, hung with shields
     ctx.fillStyle = '#8a7a5a';
-    ctx.fillRect(0, 930, W, 22); // the tilt barrier
+    ctx.fillRect(0, 930, W, 22);
     ctx.fillStyle = '#74664a';
     ctx.fillRect(0, 952, W, 8);
+    for (let i = 0; i < 7; i++) {
+      const sx2 = 50 + i * 105;
+      ctx.fillStyle = i % 2 ? this.foe.color : player().color;
+      ctx.beginPath();
+      ctx.moveTo(sx2 - 11, 935); ctx.lineTo(sx2 + 11, 935); ctx.lineTo(sx2 + 11, 952);
+      ctx.quadraticCurveTo(sx2, 962, sx2 - 11, 952);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#e8d8a8'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
     // riders
     let px = 130, fx = W - 130;
     if (this.phase === 'run') {
@@ -1034,6 +1213,18 @@ const JoustScene = {
       px = W / 2 - 95; fx = W / 2 + 95;
     }
     const gal = this.phase === 'run' ? gTime * 22 : gTime * 3;
+    if (this.phase === 'run' && this.t > 0.35) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 7; i++) {
+        const ly = 840 + ((i * 53) % 220);
+        const lx = (gTime * 1400 + i * 197) % (W + 260) - 130;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx - 90 - this.t * 50, ly);
+        ctx.stroke();
+      }
+    }
     drawJoustKnight(fx, 905, 1.15, -1, this.foe.color, { legPhase: gal + 2, fall: this.fallF });
     drawJoustKnight(px, 985, 1.3, 1, player().color, { legPhase: gal, fall: this.fallP });
     // aim gauge
@@ -1064,9 +1255,11 @@ const JoustScene = {
     panel(W / 2 - 200, 20, 400, 110, { r: 14 });
     text(`Pass ${this.pass}`, W / 2, 48, 22, '#cbbf9f');
     textShadow(`You  ${this.scoreP}   —   ${this.scoreF}  Foe`, W / 2, 88, 32, '#ffd75e');
+    vignette(0.34);
     if (this.phase === 'ready') {
       textShadow('Tap to begin the pass!', W / 2, 1140, 34, '#ffe9a0');
     } else if (this.phase === 'impact') {
+      letterbox(easeOut(clamp(this.t * 4, 0, 1)));
       textShadow(this.resultMsg, W / 2, 1140, 30, '#ffd75e');
     }
   },
@@ -1108,7 +1301,11 @@ const SiegeScene = {
       b.vy += 760 * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
-      if (Math.random() < 0.4) spawn(b.x, b.y, { vx: 0, vy: 0, g: 0, life: 0.3, size: 4, color: 'rgba(120,110,90,0.5)' });
+      spawn(b.x, b.y, {
+        vx: rnd(-20, 20), vy: rnd(-20, 20), g: -30, life: rnd(0.25, 0.5),
+        size: rnd(3, 6), color: pick(['#ff9a40', '#ffce6a', '#e85a30']),
+      });
+      if (Math.random() < 0.4) spawn(b.x, b.y, { vx: 0, vy: -10, g: -20, life: 0.6, size: 5, color: 'rgba(90,80,75,0.5)' });
       let hit = false;
       for (const r of this.wallRects()) {
         if (r.seg.hp > 0 && b.x > r.x && b.x < r.x + r.w + 60 && b.y > r.y && b.y < r.y + r.h) {
@@ -1157,21 +1354,48 @@ const SiegeScene = {
     Sfx.thud();
   },
   render() {
-    // dusk sky
-    ctx.fillStyle = skyGradient(0, 700, '#3c3050', '#c87850');
+    // a siege by night
+    const sky = ctx.createLinearGradient(0, 0, 0, 700);
+    sky.addColorStop(0, '#070b1e');
+    sky.addColorStop(0.6, '#1c1a3a');
+    sky.addColorStop(1, '#3a2c44');
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, 700);
-    ctx.fillStyle = 'rgba(255,190,120,0.9)';
-    ctx.beginPath(); ctx.arc(110, 240, 44, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#574a3a';
+    if (!this.stars) {
+      const rg = mulberry32(7);
+      this.stars = Array.from({ length: 80 }, () => ({ x: rg() * W, y: rg() * 600, r: 0.6 + rg() * 1.6, p: rg() * TAU }));
+    }
+    for (const s of this.stars) {
+      ctx.globalAlpha = 0.3 + 0.6 * Math.abs(Math.sin(gTime * 0.9 + s.p));
+      ctx.fillStyle = '#dce6ff';
+      ctx.fillRect(s.x, s.y, s.r, s.r);
+    }
+    ctx.globalAlpha = 1;
+    glow(110, 220, 130, 'rgba(220,228,255,0.6)', 0.6);
+    ctx.fillStyle = '#e4e2d2';
+    ctx.beginPath(); ctx.arc(110, 220, 42, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(7,11,30,0.85)';
+    ctx.beginPath(); ctx.arc(94, 210, 36, 0, TAU); ctx.fill();
+    // far hills
+    ctx.fillStyle = '#0e0e22';
+    ctx.beginPath();
+    ctx.moveTo(0, 680);
+    for (let x = 0; x <= W; x += 36) ctx.lineTo(x, 650 + fnoise(x * 0.005, 2.7) * 60);
+    ctx.lineTo(W, 700); ctx.lineTo(0, 700);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#322a24';
     ctx.fillRect(0, 690, W, H - 690);
-    ctx.fillStyle = '#4a3e30';
+    ctx.fillStyle = '#28221c';
     ctx.fillRect(0, 1020, W, H - 1020);
     // the castle keep behind the walls
-    ctx.fillStyle = '#3e3428';
+    ctx.fillStyle = '#231e16';
     ctx.fillRect(620, 480, 100, 540);
     for (let i = 0; i < 4; i++) ctx.fillRect(620 + i * 26, 462, 14, 18);
-    ctx.fillStyle = `rgba(255,200,90,${0.5 + 0.4 * Math.sin(gTime * 2.2)})`;
+    glow(662, 571, 60, 'rgba(255,180,80,0.7)', 0.5 + 0.2 * Math.sin(gTime * 2.2));
+    ctx.fillStyle = `rgba(255,200,90,${0.6 + 0.35 * Math.sin(gTime * 2.2)})`;
     ctx.fillRect(655, 560, 14, 22);
+    ctx.fillStyle = `rgba(255,200,90,${0.5 + 0.35 * Math.sin(gTime * 1.7 + 2)})`;
+    ctx.fillRect(688, 640, 12, 18);
     // defender flag
     const t = this.t;
     const col = t.owner < 0 ? NEUTRAL_COLOR : S.lords[t.owner].color;
@@ -1194,7 +1418,12 @@ const SiegeScene = {
         }
         continue;
       }
-      ctx.fillStyle = r.seg.hp === 2 ? '#8a7e68' : '#776a54';
+      ctx.fillStyle = r.seg.hp === 2 ? '#6e6654' : '#5c5446';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      const ml = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+      ml.addColorStop(0, 'rgba(150,170,220,0.16)');
+      ml.addColorStop(1, 'rgba(0,0,0,0.22)');
+      ctx.fillStyle = ml;
       ctx.fillRect(r.x, r.y, r.w, r.h);
       ctx.strokeStyle = 'rgba(40,32,22,0.5)';
       ctx.lineWidth = 2;
@@ -1211,8 +1440,20 @@ const SiegeScene = {
         ctx.lineTo(r.x + 52, r.y + r.h);
         ctx.stroke();
       }
-      // a defender on top
+      // a defender and a brazier on top
       drawSoldier(r.x + 46, r.y - 22, 1.4, col, -1);
+      const bx = r.x + 14, by = r.y - 20;
+      glow(bx, by - 6, 56, 'rgba(255,160,70,0.7)', 0.5 + 0.15 * Math.sin(gTime * 8 + r.i * 2));
+      ctx.fillStyle = '#3a3026';
+      ctx.fillRect(bx - 8, by, 16, 7);
+      const fl = Math.sin(gTime * 9 + r.i) * 3;
+      ctx.fillStyle = '#ff9a30';
+      ctx.beginPath(); ctx.ellipse(bx, by - 8, 6, 11 + fl, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffd75e';
+      ctx.beginPath(); ctx.ellipse(bx, by - 5, 3.5, 6, 0, 0, TAU); ctx.fill();
+      if (Math.random() < 0.15) {
+        spawn(bx, by - 12, { vx: rnd(-12, 12), vy: rnd(-50, -25), g: -20, life: 0.7, size: 2.5, color: '#ffb050' });
+      }
     }
     // catapult
     ctx.save();
@@ -1237,12 +1478,16 @@ const SiegeScene = {
     ctx.fillStyle = '#4a3a22';
     ctx.fillRect(-12, -30, 24, 100);
     ctx.restore();
-    // boulder ready / in flight
+    // torchlight around the catapult crew
+    glow(170, 850, 230, 'rgba(255,160,70,0.45)', 0.55 + 0.08 * Math.sin(gTime * 6));
+    // a flaming boulder in flight
     if (this.boulder) {
-      ctx.fillStyle = '#6a6054';
-      ctx.beginPath(); ctx.arc(this.boulder.x, this.boulder.y, 15, 0, TAU); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.18)';
-      ctx.beginPath(); ctx.arc(this.boulder.x - 4, this.boulder.y - 5, 6, 0, TAU); ctx.fill();
+      const b = this.boulder;
+      glow(b.x, b.y, 60, 'rgba(255,150,50,0.9)', 0.7);
+      ctx.fillStyle = '#4a423a';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 15, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,170,70,0.85)';
+      ctx.beginPath(); ctx.arc(b.x - 5, b.y - 5, 7, 0, TAU); ctx.fill();
     }
     // drag aim preview
     if (this.drag && !this.boulder && this.ammo > 0) {
@@ -1257,6 +1502,7 @@ const SiegeScene = {
         ctx.beginPath(); ctx.arc(bx, by, 4, 0, TAU); ctx.fill();
       }
     }
+    vignette(0.5);
     // hud
     panel(20, 20, 330, 96, { r: 12 });
     text(`The Siege of ${t.name}`, 40, 50, 22, '#f5e9c8', 'left');
@@ -1393,6 +1639,18 @@ const RaidScene = {
     }
     ctx.fillStyle = '#24202e';
     ctx.fillRect(0, 520, W, H - 520);
+    // pools of torchlight on the flagstones
+    glow(120, 760, 260, 'rgba(255,160,70,0.35)', 0.55);
+    glow(600, 760, 260, 'rgba(255,160,70,0.35)', 0.55);
+    glow(600, 130, 120, 'rgba(220,228,255,0.5)', 0.5);
+    // night mist creeping through the courtyard
+    ctx.fillStyle = 'rgba(160,170,200,0.06)';
+    for (let i = 0; i < 3; i++) {
+      const fx = ((gTime * (8 + i * 5) + i * 300) % (W + 560)) - 280;
+      ctx.beginPath();
+      ctx.ellipse(fx, 880 + i * 90, 240, 42, 0, 0, TAU);
+      ctx.fill();
+    }
     // duelists
     const lungeP = this.phase === 'hit' && this.flash.includes('!') && this.ehp < 3 ? Math.max(0, 1 - this.t * 2) : 0;
     drawSoldier(240 + lungeP * 60, 800, 5, player().color, 1, lungeP);
@@ -1463,6 +1721,8 @@ const EndScene = {
     if (this.won) {
       ctx.fillStyle = skyGradient(0, H, '#2a1c3c', '#0e0c16');
       ctx.fillRect(0, 0, W, H);
+      sunRays(W / 2, 380, 330, '#ffd75e', 0.11, 13, 0.035);
+      glow(W / 2, 380, 260, 'rgba(255,210,110,0.6)', 0.75);
       ctx.save();
       ctx.shadowColor = 'rgba(255,210,90,0.9)';
       ctx.shadowBlur = 60;

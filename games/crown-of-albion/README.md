@@ -24,9 +24,12 @@ close the tab and pick up where you left off via **Continue**.
 
 ## The goal
 
-The king of Albion is dead. Twelve provinces lie in dispute between you and three
-rival lords. **Claim all twelve provinces to win the crown.** Lose all of your
-provinces and your house has fallen.
+The king of Albion is dead. Twelve provinces of Britain — from Cornwall to the
+Highlands — lie in dispute between you and three rival lords. **Claim all twelve
+provinces to win the crown.** Lose all of your provinces and your house has fallen.
+
+(The coastline is a simplified tracing of real geography; geography is public
+domain, and every name on the map is a historical region of the island.)
 
 ## Each month you can
 
@@ -57,8 +60,15 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
 
 ## Features
 
-- Procedurally generated kingdom map (noise-jittered Voronoi island, repainted
-  live as borders change) with animated sea, ships, and waving heraldic banners
+- A map of the real isle of Great Britain (hand-traced coastline, noise-roughened
+  so it reads hand-drawn) divided into twelve historical provinces — Wessex,
+  Mercia, Northumbria, York, Kent, East Anglia, Cornwall, Gwynedd, Cumbria,
+  Lothian, Argyll, and the Highlands — with embossed relief shading, inked
+  terrain icons, coastal surf, drifting cloud shadows, sun-glint on the sea,
+  a compass rose, a sea serpent, and an ornate chart border
+- Cinematic presentation: slow-motion letterboxed joust impacts, god rays and
+  golden-hour lighting, layered hazy hills, a torch-lit night siege with flaming
+  boulders and braziers, vignettes and atmospheric haze on every scene
 - Three playable champions with different strengths, and three difficulty levels
 - Three rival AI lords who recruit, expand, besiege, and can be eliminated
 - Fame system: renown from tourneys and conquest boosts your leadership in battle

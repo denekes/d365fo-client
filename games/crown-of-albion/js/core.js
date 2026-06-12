@@ -510,6 +510,8 @@ const Modal = {
 
 /* ---------------- scene & loop ---------------- */
 let scene = null, gTime = 0, shake = 0;
+let timeScale = 1, slowMoT = 0;
+function slowMo(scale, dur) { timeScale = scale; slowMoT = dur; }
 function setScene(s, ...args) {
   if (scene && scene.exit) scene.exit();
   scene = s;
@@ -517,8 +519,10 @@ function setScene(s, ...args) {
 }
 let lastTs = 0;
 function frame(ts) {
-  const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
+  const rawDt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
   lastTs = ts;
+  if (slowMoT > 0) { slowMoT -= rawDt; if (slowMoT <= 0) timeScale = 1; }
+  const dt = rawDt * timeScale;
   gTime += dt;
   Sfx.update();
   if (scene && scene.update) scene.update(dt);
@@ -547,6 +551,48 @@ function resize() {
   canvas.width = Math.max(1, Math.round(W * s * dpr));
   canvas.height = Math.max(1, Math.round(H * s * dpr));
   drawScale = canvas.width / W;
+}
+
+/* ---------------- cinematic helpers ---------------- */
+function vignette(strength = 0.4) {
+  const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.74);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(8,6,14,${strength})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+function letterbox(k) {
+  if (k <= 0) return;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, 92 * k);
+  ctx.fillRect(0, H - 92 * k, W, 92 * k);
+}
+function sunRays(x, y, r, color, alpha, n = 10, speed = 0.05) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(gTime * speed);
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    ctx.rotate(TAU / n);
+    ctx.globalAlpha = alpha * (0.55 + 0.45 * Math.sin(gTime * 0.8 + i * 1.7));
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(r, -r * 0.055);
+    ctx.lineTo(r, r * 0.055);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function glow(x, y, r, color, alpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
 }
 
 function initEngine() {

@@ -1,38 +1,63 @@
 'use strict';
 /* =========================================================
    Crown of Albion — world
-   map generation / game state / economy / combat / AI
+   the isle of Britain / game state / economy / combat / AI
    ========================================================= */
 
 const MAPY = 120, MAPH = 1000;          // map strip inside the screen
 const HALFW = 360, HALFH = 500;         // half-resolution raster for territories
 
-const TERR_DEFS = [
-  { name: 'Norhelm',    sx: 180, sy: 60 },
-  { name: 'Greywick',   sx: 105, sy: 115 },
-  { name: 'Ravenmoor',  sx: 255, sy: 115 },
-  { name: 'Mistshore',  sx: 62,  sy: 200 },
-  { name: 'Highfell',   sx: 180, sy: 178 },
-  { name: 'Eastmarch',  sx: 298, sy: 200 },
-  { name: 'Westvale',   sx: 112, sy: 272 },
-  { name: 'Stonereach', sx: 238, sy: 262 },
-  { name: 'Caer Bryn',  sx: 66,  sy: 330 },
-  { name: 'Sunhollow',  sx: 180, sy: 345 },
-  { name: 'Oakhaven',   sx: 292, sy: 330 },
-  { name: 'Thornmere',  sx: 180, sy: 438 },
+/* A simplified tracing of the Great Britain coastline (half-res coords,
+   x right, y down). North tip first, down the east coast, back up the west. */
+const BRITAIN = [
+  [215, 25], [245, 38], [262, 60], [235, 80], [268, 98], [258, 122],
+  [242, 132], [272, 148], [285, 178], [295, 215], [288, 228], [312, 245],
+  [305, 278], [332, 295], [330, 322], [305, 348], [302, 362], [295, 378],
+  [262, 392], [225, 398], [185, 396], [148, 388], [98, 396], [58, 384],
+  [85, 368], [122, 345], [152, 322], [128, 330], [92, 318], [72, 306],
+  [98, 290], [92, 262], [108, 250], [138, 238], [158, 242], [162, 215],
+  [152, 192], [168, 172], [148, 158], [162, 138], [142, 118], [168, 98],
+  [148, 72], [172, 52], [190, 38],
 ];
 
-const HOME_TERRS = [11, 0, 5, 3];  // player, then the three rival lords
+function inPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/* The twelve provinces — historical regions of the isle. */
+const TERR_DEFS = [
+  { name: 'The Highlands', sx: 210, sy: 66,  terrain: 'mount' },
+  { name: 'Argyll',        sx: 184, sy: 114, terrain: 'mount' },
+  { name: 'Lothian',       sx: 230, sy: 150, terrain: 'plain' },
+  { name: 'Northumbria',   sx: 256, sy: 188, terrain: 'moor' },
+  { name: 'Cumbria',       sx: 184, sy: 206, terrain: 'mount' },
+  { name: 'York',          sx: 252, sy: 248, terrain: 'plain' },
+  { name: 'Gwynedd',       sx: 120, sy: 272, terrain: 'mount' },
+  { name: 'Mercia',        sx: 214, sy: 300, terrain: 'forest' },
+  { name: 'East Anglia',   sx: 298, sy: 318, terrain: 'plain' },
+  { name: 'Wessex',        sx: 204, sy: 362, terrain: 'plain' },
+  { name: 'Kent',          sx: 276, sy: 366, terrain: 'plain' },
+  { name: 'Cornwall',      sx: 100, sy: 372, terrain: 'moor' },
+];
+
+const HOME_TERRS = [9, 2, 8, 6];  // player Wessex; rivals Lothian, East Anglia, Gwynedd
 
 const HEROES = [
-  { name: 'Sir Aldric the Bold',    joust: 8, blade: 5, lead: 5, blurb: 'A tournament legend. None ride the tilt so true.' },
-  { name: 'Lady Maren of Thornmere',joust: 5, blade: 8, lead: 5, blurb: 'A duelist without equal, quick as winter wind.' },
-  { name: 'Sir Corwin the Wise',    joust: 5, blade: 5, lead: 8, blurb: 'A master of war. Soldiers fight twice as hard under his banner.' },
+  { name: 'Sir Aldric the Bold',  joust: 8, blade: 5, lead: 5, blurb: 'A tournament legend. None ride the tilt so true.' },
+  { name: 'Lady Maren of Wessex', joust: 5, blade: 8, lead: 5, blurb: 'A duelist without equal, quick as winter wind.' },
+  { name: 'Sir Corwin the Wise',  joust: 5, blade: 5, lead: 8, blurb: 'A master of war. Soldiers fight twice as hard under his banner.' },
 ];
 
 const AI_LORDS = [
-  { name: 'Lord Bran the Black',   color: '#34548f', joust: 7, blade: 6, lead: 6 },
-  { name: 'Duke Osric of Eastmarch', color: '#3e7c3a', joust: 6, blade: 7, lead: 5 },
+  { name: 'Lord Bran the Black',  color: '#34548f', joust: 7, blade: 6, lead: 6 },
+  { name: 'Duke Osric of Anglia', color: '#3e7c3a', joust: 6, blade: 7, lead: 5 },
   { name: 'Baron Hadwin the Grim', color: '#6b4a9e', joust: 5, blade: 5, lead: 8 },
 ];
 
@@ -55,13 +80,13 @@ let S = null; // live game state
 const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
   area: [], cx: [], cy: [], adj: [],
-  halfCanvas: null, landCanvas: null, grainCanvas: null,
+  halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null,
 
   inIsland(x, y) {
-    const nx = (x - 180) / 152, ny = (y - 250) / 218;
-    const r = nx * nx + ny * ny;
-    const n = fnoise(x * 0.018 + 3.7, y * 0.018 + 9.2);
-    return r + (n - 0.5) * 0.55 < 0.94;
+    // wobble the sample point so the coast reads hand-drawn, not vectory
+    const jx = x + (fnoise(x * 0.06 + 3.7, y * 0.06 + 9.2) - 0.5) * 9;
+    const jy = y + (fnoise(x * 0.06 + 17.3, y * 0.06 + 4.9) - 0.5) * 9;
+    return inPoly(jx, jy, BRITAIN);
   },
 
   build() {
@@ -113,6 +138,7 @@ const MapGen = {
     this.landCanvas.width = W;
     this.landCanvas.height = MAPH;
     this.makeGrain();
+    this.makeFoam();
     this.repaint();
   },
 
@@ -133,6 +159,42 @@ const MapGen = {
       }
     }
     c.putImageData(img, 0, 0);
+  },
+
+  /* soft white surf hugging the coastline, blended over the sea each frame */
+  makeFoam() {
+    const half = document.createElement('canvas');
+    half.width = HALFW;
+    half.height = HALFH;
+    const hc = half.getContext('2d');
+    const img = hc.createImageData(HALFW, HALFH);
+    for (let y = 1; y < HALFH - 1; y++) {
+      for (let x = 1; x < HALFW - 1; x++) {
+        if (this.idx[y * HALFW + x] >= 0) continue;
+        let nearLand = 0;
+        for (let r = 1; r <= 3; r++) {
+          if (this.idx[y * HALFW + x + r] >= 0 || this.idx[y * HALFW + x - r] >= 0 ||
+              this.idx[(y + r) * HALFW + x] >= 0 || this.idx[(y - r) * HALFW + x] >= 0) {
+            nearLand = 4 - r;
+            break;
+          }
+        }
+        if (!nearLand) continue;
+        const o = (y * HALFW + x) * 4;
+        img.data[o] = 225; img.data[o + 1] = 240; img.data[o + 2] = 250;
+        img.data[o + 3] = 50 + nearLand * 38;
+      }
+    }
+    hc.putImageData(img, 0, 0);
+    this.foamCanvas = document.createElement('canvas');
+    this.foamCanvas.width = W;
+    this.foamCanvas.height = MAPH;
+    const fc = this.foamCanvas.getContext('2d');
+    fc.imageSmoothingEnabled = true;
+    fc.globalAlpha = 0.6;
+    for (const [ox, oy] of [[0, 0], [1.5, 1], [-1.5, -1]]) {
+      fc.drawImage(half, ox, oy, W, MAPH);
+    }
   },
 
   ownerColor(i) {
@@ -168,12 +230,19 @@ const MapGen = {
           if (nv < 0) coast = true;
           else if (nv !== t) border = true;
         }
-        if (coast) { r *= 0.45; g *= 0.45; b *= 0.45; }
+        if (coast) { r *= 0.42; g *= 0.42; b *= 0.42; }
         else if (border) { r *= 0.62; g *= 0.62; b *= 0.62; }
-        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 26;
-        d[o * 4] = clamp(r + sh, 0, 255);
-        d[o * 4 + 1] = clamp(g + sh, 0, 255);
-        d[o * 4 + 2] = clamp(b + sh, 0, 255);
+        // embossed relief, exaggerated in the mountains
+        const mFac = TERR_DEFS[t].terrain === 'mount' ? 2.4 : 1;
+        const e1 = fnoise(x * 0.035 + 11, y * 0.035 + 5);
+        const e2 = fnoise((x + 1.6) * 0.035 + 11, (y + 1.6) * 0.035 + 5);
+        const relief = (e1 - e2) * 130 * mFac;
+        // warmer light in the south, cooler in the north
+        const warmth = (y / HALFH - 0.45) * 16;
+        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 22 + relief;
+        d[o * 4] = clamp(r + sh + warmth, 0, 255);
+        d[o * 4 + 1] = clamp(g + sh + warmth * 0.4, 0, 255);
+        d[o * 4 + 2] = clamp(b + sh - warmth * 0.5, 0, 255);
         d[o * 4 + 3] = 255;
       }
     }
@@ -183,6 +252,48 @@ const MapGen = {
     lc.imageSmoothingEnabled = true;
     lc.drawImage(this.halfCanvas, 0, 0, W, MAPH);
     lc.drawImage(this.grainCanvas, 0, 0);
+    this.decorate(lc);
+  },
+
+  /* hand-inked terrain icons, medieval-chart style */
+  decorate(lc) {
+    const ink = 'rgba(58,40,24,0.6)';
+    for (let i = 0; i < TERR_DEFS.length; i++) {
+      const def = TERR_DEFS[i];
+      if (def.terrain === 'plain') continue;
+      const rng = mulberry32(i * 977 + 13);
+      const cx = this.cx[i] * 2, cy = this.cy[i] * 2;
+      let placed = 0, tries = 0;
+      while (placed < 5 && tries++ < 30) {
+        const a = rng() * TAU, rr = 34 + rng() * 64;
+        const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr * 0.8;
+        if (this.terrAt(x, y + MAPY) !== i) continue;
+        if (Math.abs(x - cx) < 52 && y < cy + 6 && y > cy - 60) continue; // keep the banner clear
+        lc.save();
+        lc.translate(x, y);
+        lc.strokeStyle = ink;
+        lc.fillStyle = ink;
+        lc.lineWidth = 2;
+        if (def.terrain === 'mount') {
+          lc.beginPath();
+          lc.moveTo(-12, 6); lc.lineTo(-2, -10); lc.lineTo(8, 6);
+          lc.stroke();
+          lc.beginPath();
+          lc.moveTo(-2, -10); lc.lineTo(2, -2);
+          lc.stroke();
+        } else if (def.terrain === 'forest') {
+          lc.beginPath(); lc.arc(0, -5, 6, 0, TAU); lc.fill();
+          lc.beginPath(); lc.moveTo(0, 1); lc.lineTo(0, 8); lc.stroke();
+        } else { // moor
+          lc.beginPath();
+          lc.moveTo(-9, 0); lc.lineTo(-3, 0);
+          lc.moveTo(1, 4); lc.lineTo(8, 4);
+          lc.stroke();
+        }
+        lc.restore();
+        placed++;
+      }
+    }
   },
 
   terrAt(px, py) {
@@ -210,7 +321,7 @@ function newGame(heroIdx, diff) {
   const terr = TERR_DEFS.map((t, i) => ({
     id: i, name: t.name, owner: -1,
     garrison: irnd(6, 14), castle: 0,
-    income: clamp(5 + Math.round(MapGen.area[i] / 2600), 5, 15),
+    income: clamp(5 + Math.round(MapGen.area[i] / 1800), 5, 15),
   }));
   HOME_TERRS.forEach((ti, li) => {
     terr[ti].owner = li;
@@ -399,7 +510,7 @@ function advanceMonth() {
 }
 
 /* ---------------- save / load ---------------- */
-const SAVE_KEY = 'crownOfAlbion.save.v1';
+const SAVE_KEY = 'crownOfAlbion.save.v2';
 function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* private mode */ }
 }
