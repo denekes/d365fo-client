@@ -94,9 +94,22 @@ vm.runInContext(`
   newGame(0, 1);
   __r.lords = S.lords.length === 4 && S.lords[0].isPlayer;
   __r.homes = HOME_TERRS.every((ti, li) => S.terr[ti].owner === li && S.terr[ti].castle === 1);
-  __r.neutrals = S.terr.filter(t => t.owner === -1).length === 8;
+  __r.neutrals = S.terr.filter(t => t.owner === -1 && !t.sherwood).length === 8;
   __r.targets = targetsFor(0).length >= 1;
   __r.save = hasSave();
+
+  // Sherwood Forest: exists, unconquerable, never a march target, land-bordered
+  __r.sherwoodExists = SHERWOOD >= 0 && S.terr[SHERWOOD].sherwood && S.terr[SHERWOOD].owner === -1;
+  __r.sherwoodHasLandBorder = MapGen.adj[SHERWOOD].size >= 2;
+  let sherwoodTargetable = false;
+  for (let li = 0; li < S.lords.length; li++) if (targetsFor(li).includes(SHERWOOD)) sherwoodTargetable = true;
+  __r.sherwoodSafe = !sherwoodTargetable;
+  // land-only adjacency: no two provinces are "adjacent" unless they touch on land
+  __r.adjSymmetric = MapGen.adj.every((set, i) => [...set].every(j => MapGen.adj[j].has(i)));
+  // Robin's aid grants Merry Men, loot and a cooldown
+  const beforeS = S.lords[0].army.s, beforeGold = S.lords[0].gold;
+  const aid = grantRobinAid(26);
+  __r.robinAid = S.lords[0].army.s > beforeS && aid.men > 0 && sherwoodCooldown() > 0;
 
   // battle math: a big host should beat a small garrison nearly always
   let wins = 0;
@@ -129,6 +142,7 @@ vm.runInContext(`
   __r.consistent = S.terr.every(t => t.owner >= -1 && t.owner < 4 && t.garrison >= 0);
   __r.aliveSync = S.lords.every(l => l.isPlayer || l.alive === (S.terr.some(t => t.owner === l.id)));
   __r.aiExpanded = S.terr.filter(t => t.owner > 0).length > 3;
+  __r.sherwoodStaysFree = S.terr[SHERWOOD].owner === -1;  // AI never took it over 40 months
 
   // capture + elimination wiring
   const victim = S.lords.find(l => !l.isPlayer && l.alive);
@@ -182,6 +196,12 @@ vm.runInContext(`
       if (scene.phase === 'prompt') scene.resolve(true);
     }
     Modal.close();
+    setScene(ArcheryScene); Modal.close();
+    for (let i = 0; i < 400 && scene === ArcheryScene && scene.phase !== 'done'; i++) {
+      scene.update(0.016); scene.render(0.016);
+      if (scene.phase === 'aim') scene.loose();
+    }
+    Modal.close();
     setScene(EndScene, true); scene.update(0.016); scene.render(0.016);
     setScene(EndScene, false); scene.update(0.016); scene.render(0.016);
     setScene(TitleScene); scene.update(0.016); scene.render(0.016);
@@ -201,12 +221,18 @@ check('state: home provinces assigned with castles', r.homes);
 check('state: eight neutral provinces', r.neutrals);
 check('state: player has marchable targets', r.targets);
 check('state: autosave written', r.save);
+check('sherwood: exists as a free, unconquerable province', r.sherwoodExists);
+check('sherwood: has land borders', r.sherwoodHasLandBorder);
+check('sherwood: is never a march target', r.sherwoodSafe);
+check('map: land adjacency is symmetric', r.adjSymmetric);
+check('robin: aid grants Merry Men, loot and a cooldown', r.robinAid);
 check('battle: strong host wins', r.battleStrongWins);
 check('battle: weak host loses vs fortress', r.battleWeakLoses);
 check('battle: breached walls help the attacker', r.breachHelps);
 check('ai: 40 months leave world consistent', r.consistent);
 check('ai: alive flag matches holdings', r.aliveSync);
 check('ai: rivals expand', r.aiExpanded);
+check('sherwood: stays free after 40 AI months', r.sherwoodStaysFree);
 check('rules: losing all land eliminates a lord', r.elim);
 check('save: load round-trips', r.load);
 check('scenes: all scenes run without throwing', r.scenes);

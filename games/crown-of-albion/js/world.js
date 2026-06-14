@@ -45,7 +45,10 @@ const TERR_DEFS = [
   { name: 'Wessex',        sx: 204, sy: 362, terrain: 'plain' },
   { name: 'Kent',          sx: 276, sy: 366, terrain: 'plain' },
   { name: 'Cornwall',      sx: 100, sy: 372, terrain: 'moor' },
+  { name: 'Sherwood Forest', sx: 243, sy: 280, terrain: 'forest', sherwood: true },
 ];
+
+const SHERWOOD = TERR_DEFS.findIndex(t => t.sherwood);
 
 const HOME_TERRS = [9, 2, 8, 6];  // player Wessex; rivals Lothian, East Anglia, Gwynedd
 
@@ -208,7 +211,8 @@ const MapGen = {
     const img = hc.createImageData(HALFW, HALFH);
     const d = img.data;
     const base = hexRGB('#cdbd92');
-    const cols = TERR_DEFS.map((_, i) => {
+    const cols = TERR_DEFS.map((def, i) => {
+      if (def.sherwood) { const fg = hexRGB('#2f6e34'); return [fg[0], fg[1], fg[2]]; }
       const oc = hexRGB(this.ownerColor(i));
       return [
         base[0] * 0.55 + oc[0] * 0.45,
@@ -222,16 +226,17 @@ const MapGen = {
         const t = this.idx[o];
         if (t < 0) { d[o * 4 + 3] = 0; continue; }
         let [r, g, b] = cols[t];
-        // border / coast shading
+        // border / coast shading — bold hand-inked outlines between provinces
         let border = false, coast = false;
-        for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+        for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
+                                [x + 1, y + 1], [x - 1, y - 1]]) {
           if (nx < 0 || ny < 0 || nx >= HALFW || ny >= HALFH) { coast = true; continue; }
           const nv = this.idx[ny * HALFW + nx];
           if (nv < 0) coast = true;
           else if (nv !== t) border = true;
         }
-        if (coast) { r *= 0.42; g *= 0.42; b *= 0.42; }
-        else if (border) { r *= 0.62; g *= 0.62; b *= 0.62; }
+        if (coast) { r *= 0.40; g *= 0.40; b *= 0.40; }
+        else if (border) { r = r * 0.26 + 14; g = g * 0.26 + 11; b = b * 0.26 + 8; }
         // embossed relief, exaggerated in the mountains
         const mFac = TERR_DEFS[t].terrain === 'mount' ? 2.4 : 1;
         const e1 = fnoise(x * 0.035 + 11, y * 0.035 + 5);
@@ -263,16 +268,18 @@ const MapGen = {
       if (def.terrain === 'plain') continue;
       const rng = mulberry32(i * 977 + 13);
       const cx = this.cx[i] * 2, cy = this.cy[i] * 2;
+      const treeInk = def.sherwood ? 'rgba(18,54,26,0.9)' : ink;
+      const goal = def.sherwood ? 11 : 5;
       let placed = 0, tries = 0;
-      while (placed < 5 && tries++ < 30) {
-        const a = rng() * TAU, rr = 34 + rng() * 64;
+      while (placed < goal && tries++ < 60) {
+        const a = rng() * TAU, rr = (def.sherwood ? 18 : 34) + rng() * (def.sherwood ? 78 : 64);
         const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr * 0.8;
         if (this.terrAt(x, y + MAPY) !== i) continue;
-        if (Math.abs(x - cx) < 52 && y < cy + 6 && y > cy - 60) continue; // keep the banner clear
+        if (Math.abs(x - cx) < 50 && y < cy + 4 && y > cy - 58) continue; // keep the banner clear
         lc.save();
         lc.translate(x, y);
-        lc.strokeStyle = ink;
-        lc.fillStyle = ink;
+        lc.strokeStyle = treeInk;
+        lc.fillStyle = treeInk;
         lc.lineWidth = 2;
         if (def.terrain === 'mount') {
           lc.beginPath();
@@ -282,8 +289,13 @@ const MapGen = {
           lc.moveTo(-2, -10); lc.lineTo(2, -2);
           lc.stroke();
         } else if (def.terrain === 'forest') {
-          lc.beginPath(); lc.arc(0, -5, 6, 0, TAU); lc.fill();
-          lc.beginPath(); lc.moveTo(0, 1); lc.lineTo(0, 8); lc.stroke();
+          const s = def.sherwood ? (0.8 + rng() * 0.7) : 1;
+          lc.scale(s, s);
+          lc.beginPath(); lc.arc(0, -6, 5.5, 0, TAU); lc.fill();
+          lc.beginPath(); lc.arc(-4, -2, 4.5, 0, TAU); lc.fill();
+          lc.beginPath(); lc.arc(4, -2, 4.5, 0, TAU); lc.fill();
+          lc.strokeStyle = 'rgba(70,46,24,0.8)';
+          lc.beginPath(); lc.moveTo(0, 2); lc.lineTo(0, 9); lc.stroke();
         } else { // moor
           lc.beginPath();
           lc.moveTo(-9, 0); lc.lineTo(-3, 0);
@@ -320,8 +332,9 @@ function newGame(heroIdx, diff) {
   }));
   const terr = TERR_DEFS.map((t, i) => ({
     id: i, name: t.name, owner: -1,
-    garrison: irnd(6, 14), castle: 0,
-    income: clamp(5 + Math.round(MapGen.area[i] / 1800), 5, 15),
+    garrison: t.sherwood ? 0 : irnd(6, 14), castle: 0,
+    sherwood: !!t.sherwood,
+    income: t.sherwood ? 0 : clamp(5 + Math.round(MapGen.area[i] / 1800), 5, 15),
   }));
   HOME_TERRS.forEach((ti, li) => {
     terr[ti].owner = li;
@@ -329,7 +342,7 @@ function newGame(heroIdx, diff) {
     terr[ti].castle = 1;
     terr[ti].income += 4;
   });
-  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, log: [] };
+  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, sherwoodReadyAt: 0, log: [] };
   MapGen.repaint();
   saveGame();
 }
@@ -350,10 +363,38 @@ function targetsFor(li) {
   for (const t of S.terr) {
     if (t.owner !== li) continue;
     for (const a of MapGen.adj[t.id]) {
-      if (S.terr[a].owner !== li) out.add(a);
+      // only land-bordering provinces, and never the outlaw greenwood
+      if (S.terr[a].owner !== li && !S.terr[a].sherwood) out.add(a);
     }
   }
   return [...out];
+}
+
+/* ---------------- Sherwood Forest / Robin Hood ---------------- */
+function monthAbs() { return S.year * 12 + S.month; }
+function sherwoodCooldown() { return Math.max(0, (S.sherwoodReadyAt || 0) - monthAbs()); }
+function playerBordersSherwood() {
+  if (SHERWOOD < 0) return false;
+  for (const a of MapGen.adj[SHERWOOD]) if (S.terr[a].owner === 0) return true;
+  return false;
+}
+function richestRival() {
+  let best = null;
+  for (const l of S.lords) if (!l.isPlayer && l.alive && (!best || l.gold > best.gold)) best = l;
+  return best;
+}
+/* score 0..30 from the archery contest -> Merry Men, loot and fame */
+function grantRobinAid(score) {
+  const p = player();
+  const men = Math.round(3 + score / 3);              // longbowmen, counted as soldiers
+  const knights = score >= 24 ? 2 : score >= 13 ? 1 : 0;
+  p.army.s += men; p.army.k += knights;
+  let gold = 0; const rival = richestRival();
+  if (rival) { gold = Math.min(rival.gold, 15 + score); rival.gold -= gold; p.gold += gold; }
+  p.fame += 4 + Math.round(score / 6);
+  S.sherwoodReadyAt = monthAbs() + 3;
+  saveGame();
+  return { men, knights, gold, rival };
 }
 
 /* ---------------- battle resolution (shared with AI) ---------------- */
@@ -418,7 +459,7 @@ function checkElimination(li) {
   }
 }
 
-function playerWon() { return S.terr.every(t => t.owner === 0); }
+function playerWon() { return S.terr.every(t => t.sherwood || t.owner === 0); }
 function playerLost() { return !S.lords[0].alive || lordTerrs(0).length === 0; }
 
 /* ---------------- AI ---------------- */
@@ -481,6 +522,11 @@ const EVENTS = [
     apply: () => { player().army.s = Math.max(0, player().army.s - irnd(2, 5)); },
   },
   {
+    title: 'A Gift from the Greenwood',
+    text: () => 'A hooded archer leaves a heavy purse at your camp by night — Robin Hood robs the rich to aid the just cause. You gain 30 gold.',
+    apply: () => { player().gold += 30; Sfx.coin(); },
+  },
+  {
     title: 'A Royal Tribute',
     text: () => 'Travelling minstrels sing of your deeds in every hall. Your fame grows.',
     apply: () => { player().fame += 8; Sfx.fanfare(); },
@@ -510,7 +556,7 @@ function advanceMonth() {
 }
 
 /* ---------------- save / load ---------------- */
-const SAVE_KEY = 'crownOfAlbion.save.v2';
+const SAVE_KEY = 'crownOfAlbion.save.v3';
 function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* private mode */ }
 }

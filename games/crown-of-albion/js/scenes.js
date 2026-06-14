@@ -234,6 +234,66 @@ function drawMiniKnight(x, y, s, color, dir, lunge = 0) {
   ctx.restore();
 }
 
+/* archery butt for the Robin Hood contest */
+function drawTarget(x, y, r) {
+  ctx.save();
+  ctx.strokeStyle = '#5a4226'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(x - r * 0.5, y + r); ctx.lineTo(x - r * 0.25, y + r * 1.8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + r * 0.5, y + r); ctx.lineTo(x + r * 0.25, y + r * 1.8); ctx.stroke();
+  ctx.fillStyle = '#cdb87e';
+  ctx.beginPath(); ctx.arc(x, y, r * 1.08, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#9c8650'; ctx.lineWidth = 2;
+  for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(x, y, r * 1.08 - i * 2.6, 0, TAU); ctx.stroke(); }
+  const rings = [[1.0, '#efe6cf'], [0.92, '#2a2622'], [0.66, '#3a72b0'], [0.42, '#c8423a'], [0.18, '#f5c542']];
+  for (const [rr, c] of rings) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r * rr, 0, TAU); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1.5;
+  for (const [rr] of rings) { ctx.beginPath(); ctx.arc(x, y, r * rr, 0, TAU); ctx.stroke(); }
+  ctx.restore();
+}
+function drawStuckArrow(x, y, ang) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.strokeStyle = '#7a5a32'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-34, 0); ctx.lineTo(2, 0); ctx.stroke();
+  ctx.fillStyle = '#5a6e3a';
+  ctx.beginPath(); ctx.moveTo(-34, 0); ctx.lineTo(-42, -6); ctx.lineTo(-30, 0); ctx.lineTo(-42, 6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#b9c2cc';
+  ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(-5, -4); ctx.lineTo(-5, 4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawArcher(x, y, s, draw = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  const pull = draw * 7;
+  ctx.strokeStyle = '#3a2c1c'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-2, 6); ctx.lineTo(-7, 26); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(2, 6); ctx.lineTo(8, 26); ctx.stroke();
+  ctx.fillStyle = '#2f6e34';
+  ctx.beginPath(); roundRectPath(-9, -14, 18, 22, 5); ctx.fill();
+  ctx.fillStyle = '#27592b';
+  ctx.beginPath(); ctx.moveTo(-9, -6); ctx.lineTo(9, -6); ctx.lineTo(7, 8); ctx.lineTo(-7, 8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#d8b48c'; ctx.beginPath(); ctx.arc(0, -20, 6, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2a5e2e';
+  ctx.beginPath(); ctx.moveTo(-7, -22); ctx.quadraticCurveTo(0, -33, 9, -22); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#d8453a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(7, -27); ctx.quadraticCurveTo(15, -33, 19, -27); ctx.stroke();
+  // longbow held out to the right, string drawn back
+  const bowX = 22;
+  ctx.strokeStyle = '#7a4a28'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(bowX, -10, 24, -1.2, 1.2); ctx.stroke();
+  const tipX = bowX + Math.cos(-1.2) * 24, tipY = -10 + Math.sin(-1.2) * 24;
+  const botX = bowX + Math.cos(1.2) * 24, botY = -10 + Math.sin(1.2) * 24;
+  const nock = 4 - pull;
+  ctx.strokeStyle = '#e8e0c8'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(nock, -10); ctx.lineTo(botX, botY); ctx.stroke();
+  if (draw > 0.1) {
+    ctx.strokeStyle = '#7a5a32'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(nock, -10); ctx.lineTo(bowX + 22, -10); ctx.stroke();
+  }
+  ctx.strokeStyle = '#2f6e34'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(nock, -10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(bowX, -10); ctx.stroke();
+  ctx.restore();
+}
+
 /* ---------------- title ---------------- */
 const TitleScene = {
   stars: [],
@@ -523,6 +583,7 @@ const MapScene = {
     this.drawSea();
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
     this.drawCloudShadows();
+    this.drawRoutes();
     this.drawBanners();
     this.drawFrame();
     vignette(0.3);
@@ -654,10 +715,32 @@ const MapScene = {
     ctx.lineCap = 'butt';
   },
 
+  /* land-border march routes from the selected province */
+  drawRoutes() {
+    if (this.selected < 0) return;
+    const sel = S.terr[this.selected];
+    const [sx, sy] = MapGen.center(this.selected);
+    const fromMine = sel.owner === 0 && !sel.sherwood;
+    ctx.save();
+    for (const a of MapGen.adj[this.selected]) {
+      const [ax, ay] = MapGen.center(a);
+      const tgt = S.terr[a];
+      const march = fromMine && tgt.owner !== 0 && !tgt.sherwood;
+      ctx.setLineDash([9, 8]);
+      ctx.lineDashOffset = -gTime * 30;
+      ctx.lineWidth = march ? 4 : 2.5;
+      ctx.strokeStyle = march
+        ? `rgba(255,210,90,${0.5 + 0.32 * Math.sin(gTime * 4)})`
+        : (tgt.sherwood ? 'rgba(120,210,120,0.4)' : 'rgba(232,222,190,0.26)');
+      ctx.beginPath(); ctx.moveTo(sx, sy + 6); ctx.lineTo(ax, ay + 6); ctx.stroke();
+    }
+    ctx.restore();
+  },
+
   drawBanners() {
     for (const t of S.terr) {
       const [x, y] = MapGen.center(t.id);
-      const col = t.owner < 0 ? NEUTRAL_COLOR : S.lords[t.owner].color;
+      const col = t.sherwood ? '#2f7036' : (t.owner < 0 ? NEUTRAL_COLOR : S.lords[t.owner].color);
       if (t.id === this.selected) {
         ctx.strokeStyle = `rgba(255,235,160,${0.6 + 0.4 * Math.sin(gTime * 5)})`;
         ctx.lineWidth = 4;
@@ -681,7 +764,18 @@ const MapScene = {
       ctx.strokeStyle = 'rgba(20,15,10,0.5)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      textShadow(String(t.garrison), x + 23, y - 21 + wv * 0.6, 21, '#fff');
+      if (t.sherwood) {
+        // a bow-and-arrow device for the outlaw banner
+        const by = y - 21 + wv * 0.6;
+        ctx.strokeStyle = '#e8e0c8'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(x + 22, by, 9, -1.15, 1.15); ctx.stroke();
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x + 14, by - 8.5); ctx.lineTo(x + 14, by + 8.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + 11, by); ctx.lineTo(x + 31, by); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + 28, by - 3); ctx.lineTo(x + 31, by); ctx.lineTo(x + 28, by + 3); ctx.stroke();
+      } else {
+        textShadow(String(t.garrison), x + 23, y - 21 + wv * 0.6, 21, '#fff');
+      }
       if (t.owner === 0) drawCrown(x, y - 44, 8);
     }
   },
@@ -694,7 +788,8 @@ const MapScene = {
     textShadow(p.name, 52, 36, 26, '#f5e9c8', 'left');
     text(dateStr(), 52, 68, 21, '#cbbf9f', 'left');
     const provs = lordTerrs(0).length;
-    text(`${provs} / ${S.terr.length} provinces`, 52, 94, 19, provs >= 8 ? '#ffd75e' : '#a89c80', 'left');
+    const totalProvs = S.terr.filter(t => !t.sherwood).length;
+    text(`${provs} / ${totalProvs} provinces`, 52, 94, 19, provs >= totalProvs - 2 ? '#ffd75e' : '#a89c80', 'left');
     drawCoin(420, 34);
     textShadow(String(p.gold), 440, 34, 25, '#ffe9a0', 'left');
     drawStar(420, 70, 11);
@@ -706,8 +801,36 @@ const MapScene = {
     }
   },
 
+  drawSherwood() {
+    const x = 30, y = 815, w = W - 60, h = 230;
+    panel(x, y, w, h, { top: '#22401f', bot: '#13260f' });
+    ctx.fillStyle = '#2f7036';
+    roundRect(x + 24, y + 22, 12, 56, 4); ctx.fill();
+    textShadow('Sherwood Forest', x + 50, y + 38, 30, '#c4ec9e', 'left');
+    text('The greenwood — Robin Hood and his outlaws', x + 50, y + 70, 19, '#9fc28a', 'left');
+    this.infoBtns = [];
+    const cd = sherwoodCooldown();
+    if (!playerBordersSherwood()) {
+      text('Win a province bordering the greenwood', x + 28, y + 112, 21, '#cbbf9f', 'left');
+      text('to earn an audience with Robin Hood.', x + 28, y + 142, 21, '#cbbf9f', 'left');
+    } else if (cd > 0) {
+      text('Robin and his men are abroad on the', x + 28, y + 112, 21, '#cbbf9f', 'left');
+      text(`king's roads. Return in ${cd} month${cd > 1 ? 's' : ''}.`, x + 28, y + 142, 21, '#cbbf9f', 'left');
+    } else {
+      text('Prove your eye at the contest of the bow,', x + 28, y + 104, 20, '#cbbf9f', 'left');
+      text('and his archers will rally to your cause.', x + 28, y + 128, 20, '#cbbf9f', 'left');
+      const b = makeBtn(x + 20, y + 150, w - 40, 60, 'Seek Robin Hood’s Aid', () => {
+        S.actionUsed = true; setScene(ArcheryScene);
+      }, { color: '#2f6e34', size: 24 });
+      b.enabled = !S.actionUsed && !this.aiQueue;
+      this.infoBtns.push(b);
+    }
+    for (const b of this.infoBtns) drawBtn(b);
+  },
+
   drawInfo() {
     const t = S.terr[this.selected];
+    if (t.sherwood) { this.drawSherwood(); return; }
     const x = 30, y = 815, w = W - 60, h = 230;
     panel(x, y, w, h);
     const ownerName = t.owner < 0 ? 'No banner (free folk)' : S.lords[t.owner].name;
@@ -1696,6 +1819,141 @@ const RaidScene = {
   },
   onTap() { if (this.phase === 'prompt') this.resolve(this.prompt === 'tap'); },
   onSwipe(dir) { if (this.phase === 'prompt') this.resolve(this.prompt === dir); },
+};
+
+/* ---------------- Robin Hood: the contest of the bow ---------------- */
+const ArcheryScene = {
+  enter() {
+    this.arrow = 1;
+    this.scores = [];
+    this.shots = [];
+    this.phase = 'aim';
+    this.t = 0;
+    this.flyT = 0;
+    this.aimPt = null;
+    this.tx = 556; this.ty = 642; this.tr = 90;
+    this.trees = Array.from({ length: 12 }, () => ({ x: rnd(20, W - 20), y: rnd(300, 520), s: rnd(0.7, 1.3) }));
+    this.merry = [{ x: 230, y: 960, c: '#2f6e34' }, { x: 300, y: 1000, c: '#3a7e3a' }];
+    Modal.show({
+      title: 'Into the Greenwood',
+      lines: [
+        'You step beneath the oaks of Sherwood. Robin Hood leans on his longbow and names a wager: match his eye at the butts, and his Merry Men are yours.',
+        'A reticle drifts across the target — tap to loose each of your three arrows. The gold at the centre scores highest.',
+      ],
+      buttons: [{ label: 'Take up the bow', fn: () => Sfx.whoosh() }],
+    });
+  },
+  reticle() {
+    const sp = 2.0 + this.arrow * 0.55;
+    return [this.tx + Math.sin(this.t * sp) * this.tr * 1.3,
+            this.ty + Math.cos(this.t * sp * 1.37) * this.tr * 1.25];
+  },
+  loose() {
+    if (this.phase !== 'aim') return;
+    this.aimPt = this.reticle();
+    this.phase = 'fly';
+    this.flyT = 0;
+    Sfx.whoosh();
+  },
+  update(dt) {
+    this.t += dt;
+    if (this.phase === 'fly') { this.flyT += dt; if (this.flyT >= 0.42) this.impact(); }
+  },
+  impact() {
+    const [x, y] = this.aimPt;
+    const d = dist(x, y, this.tx, this.ty);
+    let ring = 0;
+    if (d < this.tr * 0.18) ring = 10;
+    else if (d < this.tr * 0.42) ring = 7;
+    else if (d < this.tr * 0.66) ring = 5;
+    else if (d < this.tr * 0.92) ring = 3;
+    this.shots.push({ x, y, ring });
+    this.scores.push(ring);
+    if (ring >= 10) { Sfx.fanfare(); burst(x, y, 20, { color: '#ffd75e', spMax: 240 }); slowMo(0.4, 0.25); shake = 8; buzz(60); }
+    else if (ring > 0) { Sfx.clash(); burst(x, y, 12, { color: '#d8c79a', spMax: 180 }); shake = 4; buzz(25); }
+    else { Sfx.thud(); burst(x, y, 8, { color: '#6a8a4a', spMax: 120 }); }
+    if (this.arrow >= 3) this.finish();
+    else { this.arrow++; this.phase = 'aim'; }
+  },
+  finish() {
+    this.phase = 'done';
+    const total = this.scores.reduce((a, b) => a + b, 0);
+    const r = grantRobinAid(total);
+    const quality = total >= 24 ? 'Robin himself claps you on the back — a marksman after his own heart!'
+      : total >= 13 ? 'Robin nods, well pleased with your aim.'
+        : 'Robin grins: “Stay a while — you’ll learn the bow yet.”';
+    const lines = [quality];
+    let band = `${r.men} Merry Men longbowmen`;
+    if (r.knights) band += ` and ${r.knights} seasoned outlaw${r.knights > 1 ? 's' : ''}`;
+    lines.push(band + ' join your host.');
+    if (r.gold > 0 && r.rival) lines.push(`Robin’s purse brings you ${r.gold} gold, lifted from ${r.rival.name}.`);
+    Sfx.fanfare();
+    Modal.show({
+      title: `A Score of ${total}`,
+      lines,
+      buttons: [{ label: 'Back to the Map', fn: () => setScene(MapScene) }],
+    });
+  },
+  render() {
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#2a401f');
+    sky.addColorStop(0.5, '#37512a');
+    sky.addColorStop(1, '#21341a');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+    sunRays(W * 0.66, -40, 760, '#e6f4b4', 0.06, 9, 0.02);
+    glow(W * 0.66, 70, 360, 'rgba(210,240,150,0.22)', 0.5);
+    // canopy of trees behind
+    for (const tr of this.trees) {
+      const { x, y, s } = tr;
+      ctx.fillStyle = '#1c1410'; ctx.fillRect(x - 5 * s, y + 18 * s, 10 * s, 70 * s);
+      ctx.fillStyle = '#22401d';
+      ctx.beginPath(); ctx.arc(x, y, 36 * s, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2c5026';
+      ctx.beginPath(); ctx.arc(x - 15 * s, y + 6 * s, 26 * s, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 16 * s, y + 4 * s, 24 * s, 0, TAU); ctx.fill();
+    }
+    // clearing floor
+    const grd = ctx.createLinearGradient(0, 540, 0, H);
+    grd.addColorStop(0, '#41582a');
+    grd.addColorStop(1, '#2a3c1c');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 560, W, H - 560);
+    // target + stuck arrows
+    drawTarget(this.tx, this.ty, this.tr);
+    for (const sh of this.shots) drawStuckArrow(sh.x, sh.y, rnd(-0.05, 0.05));
+    // Merry Men spectators
+    for (const m of this.merry) drawSoldier(m.x, m.y, 3.4, m.c, 1);
+    // Robin
+    drawArcher(150, 968, 4.4, this.phase === 'aim' ? 0.5 + 0.5 * Math.abs(Math.sin(gTime * 2)) : (this.phase === 'fly' ? 0.1 : 0.3));
+    // the arrow in flight
+    if (this.phase === 'fly') {
+      const k = this.flyT / 0.42;
+      const [ex, ey] = this.aimPt;
+      const ax = lerp(196, ex, k);
+      const ay = lerp(930, ey, k) - Math.sin(k * Math.PI) * 70;
+      drawStuckArrow(ax, ay, Math.atan2(ey - 930, ex - 196) * 0.4 + 0.3);
+    }
+    // aim reticle
+    if (this.phase === 'aim') {
+      const [rx, ry] = this.reticle();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rx, ry, 15, 0, TAU); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(rx - 22, ry); ctx.lineTo(rx - 7, ry);
+      ctx.moveTo(rx + 7, ry); ctx.lineTo(rx + 22, ry);
+      ctx.moveTo(rx, ry - 22); ctx.lineTo(rx, ry - 7);
+      ctx.moveTo(rx, ry + 7); ctx.lineTo(rx, ry + 22);
+      ctx.stroke();
+    }
+    vignette(0.4);
+    panel(20, 20, W - 40, 92, { r: 12 });
+    textShadow('The Contest of the Bow', W / 2, 50, 28, '#dff0b0');
+    text(`Arrow ${Math.min(this.arrow, 3)} of 3      Score ${this.scores.reduce((a, b) => a + b, 0)}`,
+      W / 2, 84, 22, '#cbbf9f');
+    if (this.phase === 'aim') textShadow('Tap to loose!', W / 2, 1200, 32, '#ffe9a0');
+  },
+  onTap() { if (this.phase === 'aim') this.loose(); },
 };
 
 /* ---------------- victory / defeat ---------------- */

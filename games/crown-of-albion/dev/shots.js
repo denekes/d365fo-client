@@ -32,10 +32,31 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright');
   await page.evaluate(() => {
     newGame(0, 1);
     setScene(MapScene);
-    MapScene.selected = MapGen.terrAt(360, 620);
+    MapScene.selected = HOME_TERRS[0];   // select Wessex to show land-march routes
   });
   await page.waitForTimeout(600);
   await shot('shot-map.png');
+
+  // Sherwood Forest selected, with Robin Hood's aid available
+  await page.evaluate(() => {
+    Modal.close();
+    for (const a of MapGen.adj[SHERWOOD]) { S.terr[a].owner = 0; break; } // hold a bordering province
+    MapGen.repaint();
+    setScene(MapScene);
+    MapScene.selected = SHERWOOD;
+  });
+  await page.waitForTimeout(500);
+  await shot('shot-sherwood.png');
+
+  // Robin Hood archery contest
+  await page.evaluate(() => {
+    setScene(ArcheryScene);
+    Modal.close();
+    ArcheryScene.shots = [{ x: 556, y: 628, ring: 10 }, { x: 540, y: 660, ring: 5 }];
+    ArcheryScene.arrow = 3;
+  });
+  await page.waitForTimeout(500);
+  await shot('shot-archery.png');
 
   await page.evaluate(() => {
     Modal.close();

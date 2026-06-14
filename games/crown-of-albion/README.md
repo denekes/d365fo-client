@@ -36,13 +36,30 @@ domain, and every name on the map is a historical region of the island.)
 | Action | What it does |
 |---|---|
 | **Recruit** | Hire soldiers (8g), knights (25g, worth four soldiers), catapults (50g, needed to breach castle walls). |
-| **March** | Tap a bordering enemy or neutral province and attack it. Choose bold, steady, or cautious tactics. |
+| **March** | Tap a **land-bordering** enemy or neutral province and attack it. Choose bold, steady, or cautious tactics. |
 | **Tournament** | Challenge a rival lord to the joust — wager gold, or (with enough fame) an entire province. |
 | **Night Raid** | Sneak into a rival's keep and duel the guard captain for a share of his treasury. Get caught and you'll be ransomed. |
+| **Seek Robin Hood** | Hold a province bordering Sherwood Forest, then visit the greenwood to win his archers at the contest of the bow. |
 | **Fortify** | Reinforce a garrison or build a castle in any province you own. |
 
-Marching, tournaments, and raids share one action per month; recruiting and
-fortifying are always available. Provinces pay taxes every month, and random
+Marching, tournaments, raids, and seeking Robin Hood share one action per month;
+recruiting and fortifying are always available.
+
+### Borders matter
+You can only march from a province you hold to one that **physically touches it on
+land** — armies never cross open sea. Select any province to see its land borders
+drawn out; the routes you can actually march along glow gold. (Adjacency is computed
+from where provinces meet on the map, so an island province could only be reached if
+it shared a land edge.)
+
+### Sherwood Forest & Robin Hood
+The green heart of the map is **Sherwood Forest** — the outlaws' domain. It can never
+be conquered by any lord. Once you hold a province bordering the greenwood, visit
+Sherwood and **Seek Robin Hood's Aid**: a three-arrow **archery contest** where a
+reticle drifts across the target and you tap to loose. Score well and Robin's
+**Merry Men longbowmen** join your host, his purse brings you gold lifted from the
+richest rival lord, and your fame rises — then he and his men lie low for a few
+months before they'll ride out again. Provinces pay taxes every month, and random
 events — harvests, bandits, wandering knights, camp fever — keep the realm lively.
 
 ## The minigames
@@ -63,9 +80,12 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
 - A map of the real isle of Great Britain (hand-traced coastline, noise-roughened
   so it reads hand-drawn) divided into twelve historical provinces — Wessex,
   Mercia, Northumbria, York, Kent, East Anglia, Cornwall, Gwynedd, Cumbria,
-  Lothian, Argyll, and the Highlands — with embossed relief shading, inked
-  terrain icons, coastal surf, drifting cloud shadows, sun-glint on the sea,
-  a compass rose, a sea serpent, and an ornate chart border
+  Lothian, Argyll, and the Highlands — plus the unconquerable **Sherwood Forest**,
+  with bold inked province borders, embossed relief shading, terrain icons,
+  coastal surf, drifting cloud shadows, sun-glint on the sea, a compass rose, a
+  sea serpent, and an ornate chart border
+- Strict land-border movement with on-map march routes, and a Robin Hood archery
+  minigame reached by holding the lands around Sherwood Forest
 - Cinematic presentation: slow-motion letterboxed joust impacts, god rays and
   golden-hour lighting, layered hazy hills, a torch-lit night siege with flaming
   boulders and braziers, vignettes and atmospheric haze on every scene
