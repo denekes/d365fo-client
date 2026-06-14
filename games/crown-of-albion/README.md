@@ -98,6 +98,16 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
   golden-hour lighting, drifting birds and cloud shadows, layered hazy hills, a
   torch-lit night siege with flaming boulders and braziers, vignettes and
   atmospheric haze on every scene
+- Hand-shaded characters: armored men-at-arms (mail, plate pauldrons, surcoats,
+  heater shields, plumed bascinets), barded warhorses with flowing caparisons and
+  crested great-helmed knights bearing couched lances with pennons, and Robin
+  Hood as a hooded Lincoln-green outlaw with cloak, quiver and longbow — rendered
+  with gradients, rim light and ambient shadow, and baked to cached sprites so the
+  detail stays smooth on a phone
+- A majestic, fully procedural medieval score: an 8-bar A-minor progression voiced
+  with a round bass, sustained chord pads, a stately recorder-and-lute lead, and a
+  war-drum, all through a generated hall reverb; fanfares and dirges share the same
+  space
 - Three playable champions with different strengths, and three difficulty levels
 - Three rival AI lords who recruit, expand, besiege, and can be eliminated
 - Fame system: renown from tourneys and conquest boosts your leadership in battle

@@ -299,39 +299,63 @@ function buzz(ms) {
   try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* unsupported */ }
 }
 
-/* ---------------- audio (procedural) ---------------- */
+/* ---------------- audio (procedural, multi-voice) ---------------- */
 const Sfx = {
-  ac: null, on: true, musicOn: true,
-  nextNote: 0, noteI: 0,
-  // short original loop, A-minor lute feel: [midi, beats]
-  melody: [
-    [57, 1], [60, 1], [64, 1], [60, 1], [62, 1.5], [60, 0.5], [59, 1], [55, 1],
-    [57, 1], [60, 1], [64, 1], [67, 1], [65, 1.5], [64, 0.5], [62, 1], [59, 1],
-    [57, 1], [60, 1], [64, 1], [60, 1], [65, 1.5], [64, 0.5], [62, 1], [64, 1],
-    [60, 2], [59, 1], [57, 3],
+  ac: null, master: null, wet: null, on: true, musicOn: true,
+  nextBar: 0, barI: 0,
+  /* an 8-bar majestic progression in A minor: Am G F Am | Dm C E Am
+     each bar: bass root, a sustained triad pad, and a stately lead line */
+  prog: [
+    { root: 45, chord: [57, 60, 64], mel: [[76, 2], [72, 2]] },
+    { root: 43, chord: [55, 59, 62], mel: [[74, 2], [71, 2]] },
+    { root: 41, chord: [53, 57, 60], mel: [[72, 2], [69, 2]] },
+    { root: 45, chord: [57, 60, 64], mel: [[69, 1], [72, 1], [76, 2]] },
+    { root: 38, chord: [50, 53, 57], mel: [[74, 2], [69, 2]] },
+    { root: 36, chord: [48, 52, 55], mel: [[72, 2], [67, 2]] },
+    { root: 40, chord: [52, 56, 59], mel: [[71, 2], [68, 2]] },
+    { root: 45, chord: [57, 60, 64], mel: [[69, 3], [71, 1]] },
   ],
   ensure() {
     if (!this.ac) {
       try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
-      this.nextNote = this.ac.currentTime + 0.3;
+      const ac = this.ac;
+      this.master = ac.createGain();
+      this.master.gain.value = 0.9;
+      this.master.connect(ac.destination);
+      // a generated hall reverb for cinematic space
+      try {
+        const len = Math.floor(ac.sampleRate * 2.2);
+        const imp = ac.createBuffer(2, len, ac.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const d = imp.getChannelData(ch);
+          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+        }
+        this.conv = ac.createConvolver(); this.conv.buffer = imp;
+        this.wet = ac.createGain(); this.wet.gain.value = 0.22;
+        this.master.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(ac.destination);
+      } catch (e) { /* no reverb */ }
+      this.nextBar = ac.currentTime + 0.35;
     }
     if (this.ac.state === 'suspended') this.ac.resume();
   },
   freq(m) { return 440 * Math.pow(2, (m - 69) / 12); },
-  tone(f, dur, { type = 'square', vol = 0.12, slide = 0, delay = 0 } = {}) {
-    if (!this.ac || !this.on) return;
+  /* one shaped voice with ADSR, routed through master (so it gets reverb) */
+  voice(f, dur, { type = 'triangle', vol = 0.1, slide = 0, delay = 0, attack = 0.012, detune = 0 } = {}) {
+    if (!this.ac || !this.on || !this.master) return;
     const t = this.ac.currentTime + delay;
     const o = this.ac.createOscillator(), g = this.ac.createGain();
     o.type = type; o.frequency.setValueAtTime(f, t);
+    if (detune) o.detune.setValueAtTime(detune, t);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), t + dur);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    o.connect(g).connect(this.ac.destination);
-    o.start(t); o.stop(t + dur + 0.05);
+    o.connect(g).connect(this.master);
+    o.start(t); o.stop(t + dur + 0.06);
   },
+  tone(f, dur, opts = {}) { this.voice(f, dur, Object.assign({ type: 'square', vol: 0.12 }, opts)); },
   noise(dur, vol = 0.2, delay = 0, low = false) {
-    if (!this.ac || !this.on) return;
+    if (!this.ac || !this.on || !this.master) return;
     const t = this.ac.currentTime + delay;
     const n = Math.floor(this.ac.sampleRate * dur);
     const buf = this.ac.createBuffer(1, n, this.ac.sampleRate);
@@ -344,34 +368,67 @@ const Sfx = {
     }
     const src = this.ac.createBufferSource(); src.buffer = buf;
     const g = this.ac.createGain(); g.gain.value = vol;
-    src.connect(g).connect(this.ac.destination);
+    src.connect(g).connect(this.master);
     src.start(t);
   },
-  tap() { this.tone(660, 0.06, { type: 'triangle', vol: 0.08 }); },
-  coin() { this.tone(880, 0.07, { type: 'square', vol: 0.07 }); this.tone(1320, 0.12, { type: 'square', vol: 0.07, delay: 0.07 }); },
-  clash() { this.noise(0.16, 0.25); this.tone(220, 0.12, { type: 'sawtooth', vol: 0.1, slide: -120 }); },
-  thud() { this.noise(0.3, 0.3, 0, true); this.tone(70, 0.25, { type: 'sine', vol: 0.25, slide: -30 }); },
-  crack() { this.noise(0.4, 0.35, 0, true); this.noise(0.15, 0.3); },
-  whoosh() { this.noise(0.25, 0.1, 0, true); },
+  // a soft timpani/war-drum
+  kick(delay, strong) {
+    this.voice(strong ? 96 : 84, 0.2, { type: 'sine', vol: strong ? 0.16 : 0.09, slide: -56, delay, attack: 0.005 });
+    this.noise(0.12, strong ? 0.05 : 0.03, delay, true);
+  },
+  tap() { this.voice(660, 0.06, { type: 'triangle', vol: 0.07 }); },
+  coin() { this.voice(880, 0.07, { type: 'square', vol: 0.06 }); this.voice(1320, 0.12, { type: 'square', vol: 0.06, delay: 0.07 }); },
+  clash() { this.noise(0.16, 0.22); this.voice(220, 0.12, { type: 'sawtooth', vol: 0.09, slide: -120 }); },
+  thud() { this.noise(0.3, 0.28, 0, true); this.voice(70, 0.25, { type: 'sine', vol: 0.22, slide: -30 }); },
+  crack() { this.noise(0.4, 0.32, 0, true); this.noise(0.15, 0.28); },
+  whoosh() { this.noise(0.25, 0.09, 0, true); },
   fanfare() {
-    const seq = [[64, 0], [64, 0.13], [64, 0.26], [69, 0.42], [72, 0.7]];
-    for (const [m, d] of seq) this.tone(this.freq(m), 0.3, { type: 'square', vol: 0.09, delay: d });
-    for (const [m, d] of seq) this.tone(this.freq(m - 12), 0.3, { type: 'triangle', vol: 0.08, delay: d });
+    // brass-like triad rising to the octave — voiced in thirds for majesty
+    const seq = [[64, 0], [64, 0.13], [64, 0.26], [67, 0.42], [72, 0.62], [76, 0.86]];
+    for (const [m, d] of seq) {
+      this.voice(this.freq(m), 0.4, { type: 'sawtooth', vol: 0.05, delay: d, attack: 0.02 });
+      this.voice(this.freq(m), 0.4, { type: 'square', vol: 0.035, delay: d, detune: 6 });
+      this.voice(this.freq(m - 12), 0.4, { type: 'triangle', vol: 0.06, delay: d });
+    }
+    this.kick(0, true); this.kick(0.42, true); this.kick(0.86, true);
   },
   dirge() {
-    const seq = [[57, 0], [55, 0.4], [53, 0.8], [52, 1.2]];
-    for (const [m, d] of seq) this.tone(this.freq(m), 0.5, { type: 'triangle', vol: 0.1, delay: d });
+    const seq = [[57, 0], [55, 0.45], [53, 0.9], [52, 1.4]];
+    for (const [m, d] of seq) {
+      this.voice(this.freq(m), 0.6, { type: 'triangle', vol: 0.09, delay: d, attack: 0.04 });
+      this.voice(this.freq(m - 12), 0.7, { type: 'sine', vol: 0.06, delay: d });
+    }
+    this.kick(0, false); this.kick(0.9, false);
   },
   update() {
-    if (!this.ac || !this.on || !this.musicOn) return;
-    const beat = 0.42;
-    while (this.nextNote < this.ac.currentTime + 0.5) {
-      const [m, beats] = this.melody[this.noteI % this.melody.length];
-      const delay = Math.max(0, this.nextNote - this.ac.currentTime);
-      this.tone(this.freq(m), beats * beat * 0.92, { type: 'triangle', vol: 0.045, delay });
-      if (this.noteI % 4 === 0) this.tone(this.freq(m - 24), beats * beat * 1.6, { type: 'sine', vol: 0.05, delay });
-      this.nextNote += beats * beat;
-      this.noteI++;
+    if (!this.ac || !this.on || !this.musicOn || !this.master) return;
+    const beat = 0.5, bar = beat * 4;
+    while (this.nextBar < this.ac.currentTime + 0.7) {
+      const delay = Math.max(0, this.nextBar - this.ac.currentTime);
+      const b = this.prog[this.barI % this.prog.length];
+      // bass: root then the fifth, low and round
+      this.voice(this.freq(b.root - 12), beat * 1.9, { type: 'sine', vol: 0.08, attack: 0.02, delay });
+      this.voice(this.freq(b.root - 12), beat * 1.9, { type: 'triangle', vol: 0.025, delay });
+      this.voice(this.freq(b.root - 5), beat * 1.9, { type: 'sine', vol: 0.07, attack: 0.02, delay: delay + beat * 2 });
+      // sustained chord pad
+      for (const m of b.chord) {
+        this.voice(this.freq(m), bar * 0.97, { type: 'triangle', vol: 0.02, attack: 0.18, delay });
+        this.voice(this.freq(m + 12), bar * 0.97, { type: 'sine', vol: 0.012, attack: 0.22, delay });
+      }
+      // stately lead, doubled an octave down very softly (recorder + lute)
+      let mt = delay;
+      for (const [m, beats] of b.mel) {
+        const d2 = beats * beat * 0.92;
+        this.voice(this.freq(m), d2, { type: 'triangle', vol: 0.05, attack: 0.02, delay: mt });
+        this.voice(this.freq(m), d2, { type: 'square', vol: 0.016, attack: 0.02, delay: mt, detune: 5 });
+        this.voice(this.freq(m - 12), d2, { type: 'sine', vol: 0.02, delay: mt });
+        mt += beats * beat;
+      }
+      // war-drum on the strong beats
+      this.kick(delay, true);
+      this.kick(delay + beat * 2, false);
+      this.nextBar += bar;
+      this.barI++;
     }
   },
 };
