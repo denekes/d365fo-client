@@ -80,13 +80,21 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright');
 
   await page.evaluate(() => {
     Modal.close();
-    const target = targetsFor(0)[0];
-    setScene(BattleScene, target, 0.5);
+    setScene(BattleScene, 4, 0);   // Cumbria — a mountain battle
     Modal.close();
     BattleScene.begin(1);
   });
   await page.waitForTimeout(1900);
   await shot('shot-battle.png');
+
+  await page.evaluate(() => {
+    Modal.close();
+    setScene(BattleScene, 9, 0);   // Wessex — a lush plains battle
+    Modal.close();
+    BattleScene.begin(1);
+  });
+  await page.waitForTimeout(1400);
+  await shot('shot-battle-plains.png');
 
   await page.evaluate(() => {
     Modal.close();

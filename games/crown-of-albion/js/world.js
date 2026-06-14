@@ -79,6 +79,40 @@ const DIFFS = [
 
 let S = null; // live game state
 
+/* ---------------- biomes (area-dependent land colour) ---------------- */
+const BIOME = {
+  plain:    ['#4f7d33', '#6fa043', '#93c062'],   // valley → meadow → bright field
+  forest:   ['#244a20', '#356128', '#4d8038'],   // deep wood → canopy → glade
+  moor:     ['#5c6a3a', '#867b48', '#a08a62'],   // boggy green → ochre heath → tan
+  mount:    ['#4c6a36', '#7d7656', '#b6b3a6'],   // green lower slope → rock → bare crag
+  sherwood: ['#1d4520', '#2c6630', '#3f7e3c'],   // the deep greenwood
+};
+function ramp(stops, e) {
+  const n = stops.length - 1;
+  const f = clamp(e, 0, 1) * n;
+  const i = Math.min(n - 1, Math.floor(f));
+  const tt = f - i;
+  const a = hexRGB(stops[i]), b = hexRGB(stops[i + 1]);
+  return [lerp(a[0], b[0], tt), lerp(a[1], b[1], tt), lerp(a[2], b[2], tt)];
+}
+function biomeColor(terrain, e, x, y) {
+  const c = ramp(BIOME[terrain] || BIOME.plain, e);
+  if (terrain === 'mount' && e > 0.8) {            // snow on the high crags
+    const s = (e - 0.8) / 0.2, sn = hexRGB('#e4ebee');
+    c[0] = lerp(c[0], sn[0], s); c[1] = lerp(c[1], sn[1], s); c[2] = lerp(c[2], sn[2], s);
+  } else if (terrain === 'moor') {                 // blooming heather
+    const h = fnoise(x * 0.24 + 5, y * 0.24 + 9);
+    if (h > 0.6) { const hp = hexRGB('#7a4f72'), s = (h - 0.6) / 0.4 * 0.55; c[0] = lerp(c[0], hp[0], s); c[1] = lerp(c[1], hp[1], s); c[2] = lerp(c[2], hp[2], s); }
+  } else if (terrain === 'plain') {                // patchwork of fields
+    const fld = (fnoise(x * 0.13 + 2, y * 0.13 + 8) - 0.5) * 30;
+    c[0] += fld; c[1] += fld * 1.15; c[2] += fld * 0.35;
+  } else if (terrain === 'forest' || terrain === 'sherwood') {
+    const dap = (fnoise(x * 0.2 + 3, y * 0.2 + 1) - 0.5) * 22;
+    c[0] += dap * 0.6; c[1] += dap; c[2] += dap * 0.5;
+  }
+  return c;
+}
+
 /* ---------------- map generation (deterministic) ---------------- */
 const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
@@ -210,22 +244,26 @@ const MapGen = {
     const hc = this.halfCanvas.getContext('2d');
     const img = hc.createImageData(HALFW, HALFH);
     const d = img.data;
-    const base = hexRGB('#cdbd92');
-    const cols = TERR_DEFS.map((def, i) => {
-      if (def.sherwood) { const fg = hexRGB('#2f6e34'); return [fg[0], fg[1], fg[2]]; }
-      const oc = hexRGB(this.ownerColor(i));
-      return [
-        base[0] * 0.55 + oc[0] * 0.45,
-        base[1] * 0.55 + oc[1] * 0.45,
-        base[2] * 0.55 + oc[2] * 0.45,
-      ];
+    // owner colour per province (a light heraldic glaze over the green land)
+    const ownerCol = TERR_DEFS.map((def, i) => {
+      if (def.sherwood) return null;
+      const ow = S ? S.terr[i].owner : -1;
+      return ow < 0 ? null : hexRGB(S.lords[ow].color);
     });
     for (let y = 0; y < HALFH; y++) {
       for (let x = 0; x < HALFW; x++) {
         const o = (y * HALFW + x);
         const t = this.idx[o];
         if (t < 0) { d[o * 4 + 3] = 0; continue; }
-        let [r, g, b] = cols[t];
+        const def = TERR_DEFS[t];
+        const terrain = def.sherwood ? 'sherwood' : def.terrain;
+        // elevation field — mountains reach higher (snow), lowlands stay lush
+        let elev = fnoise(x * 0.05 + t * 2.3, y * 0.05 + t * 1.1);
+        if (terrain === 'mount') elev = clamp(elev * 1.45, 0, 1);
+        let [r, g, b] = biomeColor(terrain, elev, x, y);
+        // a soft wash of the owning lord's colour so holdings still read
+        const oc = ownerCol[t];
+        if (oc) { const k = 0.24; r = r * (1 - k) + oc[0] * k; g = g * (1 - k) + oc[1] * k; b = b * (1 - k) + oc[2] * k; }
         // border / coast shading — bold hand-inked outlines between provinces
         let border = false, coast = false;
         for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
@@ -235,19 +273,20 @@ const MapGen = {
           if (nv < 0) coast = true;
           else if (nv !== t) border = true;
         }
-        if (coast) { r *= 0.40; g *= 0.40; b *= 0.40; }
-        else if (border) { r = r * 0.26 + 14; g = g * 0.26 + 11; b = b * 0.26 + 8; }
-        // embossed relief, exaggerated in the mountains
-        const mFac = TERR_DEFS[t].terrain === 'mount' ? 2.4 : 1;
+        // embossed relief, exaggerated in the hills
+        const mFac = terrain === 'mount' ? 2.8 : terrain === 'moor' ? 1.4 : 1;
         const e1 = fnoise(x * 0.035 + 11, y * 0.035 + 5);
         const e2 = fnoise((x + 1.6) * 0.035 + 11, (y + 1.6) * 0.035 + 5);
-        const relief = (e1 - e2) * 130 * mFac;
-        // warmer light in the south, cooler in the north
-        const warmth = (y / HALFH - 0.45) * 16;
-        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 22 + relief;
-        d[o * 4] = clamp(r + sh + warmth, 0, 255);
-        d[o * 4 + 1] = clamp(g + sh + warmth * 0.4, 0, 255);
-        d[o * 4 + 2] = clamp(b + sh - warmth * 0.5, 0, 255);
+        const relief = (e1 - e2) * 150 * mFac;
+        // warm low sun from the south-west
+        const warmth = (y / HALFH - 0.45) * 14;
+        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 16 + relief;
+        r += sh + warmth; g += sh + warmth * 0.5; b += sh - warmth * 0.5;
+        if (coast) { r *= 0.42; g *= 0.42; b *= 0.42; }
+        else if (border) { r = r * 0.24 + 12; g = g * 0.24 + 12; b = b * 0.24 + 9; }
+        d[o * 4] = clamp(r, 0, 255);
+        d[o * 4 + 1] = clamp(g, 0, 255);
+        d[o * 4 + 2] = clamp(b, 0, 255);
         d[o * 4 + 3] = 255;
       }
     }

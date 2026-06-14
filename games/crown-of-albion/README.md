@@ -86,9 +86,18 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
   sea serpent, and an ornate chart border
 - Strict land-border movement with on-map march routes, and a Robin Hood archery
   minigame reached by holding the lands around Sherwood Forest
+- Lush, area-dependent terrain: every province is painted from its own biome
+  palette — bright green meadows and patchwork fields on the lowlands, deep
+  forest canopy, ochre-and-purple heather moors, and grey crags with snow on the
+  high mountains — over directional sunlight, with ownership shown as a light
+  heraldic glaze rather than a flat colour flood
+- Battles fought on terrain that matches the province: snow-capped ranges and
+  boulder fields in the mountains, rolling green downs and grass on the plains,
+  silhouetted treelines in the forests, heather on the moors
 - Cinematic presentation: slow-motion letterboxed joust impacts, god rays and
-  golden-hour lighting, layered hazy hills, a torch-lit night siege with flaming
-  boulders and braziers, vignettes and atmospheric haze on every scene
+  golden-hour lighting, drifting birds and cloud shadows, layered hazy hills, a
+  torch-lit night siege with flaming boulders and braziers, vignettes and
+  atmospheric haze on every scene
 - Three playable champions with different strengths, and three difficulty levels
 - Three rival AI lords who recruit, expand, besiege, and can be eliminated
 - Fame system: renown from tourneys and conquest boosts your leadership in battle

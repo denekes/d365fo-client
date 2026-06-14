@@ -582,11 +582,16 @@ const MapScene = {
   render(dt) {
     this.drawSea();
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
+    // cinematic light: warm sun from the south-west, cool depth opposite
+    glow(150, MAPY + 760, 620, 'rgba(255,228,150,0.16)', 0.9);
+    ctx.fillStyle = 'rgba(40,30,70,0.10)';
+    ctx.fillRect(W / 2, MAPY, W / 2, MAPH * 0.5);
     this.drawCloudShadows();
     this.drawRoutes();
     this.drawBanners();
+    this.drawBirds();
     this.drawFrame();
-    vignette(0.3);
+    vignette(0.34);
     this.drawHUD();
     if (this.selected >= 0) this.drawInfo();
     this.drawBottomBar();
@@ -648,6 +653,20 @@ const MapScene = {
       ctx.fillStyle = '#e8e0c8';
       ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(12, -6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
       ctx.restore();
+    }
+  },
+
+  drawBirds() {
+    ctx.strokeStyle = 'rgba(30,26,30,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const bx = ((gTime * (16 + i * 5) + i * 190) % (W + 160)) - 80;
+      const by = MAPY + 120 + i * 130 + Math.sin(gTime * 1.5 + i) * 22;
+      const fl = Math.sin(gTime * 6 + i * 2) * 5;
+      ctx.beginPath();
+      ctx.moveTo(bx - 8, by - fl);
+      ctx.quadraticCurveTo(bx, by + 3, bx + 8, by - fl);
+      ctx.stroke();
     }
   },
 
@@ -950,6 +969,7 @@ const MapScene = {
 const BattleScene = {
   enter(ti, breach) {
     this.t = S.terr[ti];
+    this.terrain = TERR_DEFS[ti].sherwood ? 'forest' : TERR_DEFS[ti].terrain;
     this.breach = breach;
     this.res = null;
     this.roundI = 0;
@@ -1034,18 +1054,7 @@ const BattleScene = {
       ctx.quadraticCurveTo(bx, by + 4, bx + 9, by - fl);
       ctx.stroke();
     }
-    const ground = ctx.createLinearGradient(0, 540, 0, H);
-    ground.addColorStop(0, '#4c6638');
-    ground.addColorStop(0.5, '#3c5232');
-    ground.addColorStop(1, '#283c24');
-    ctx.fillStyle = ground;
-    ctx.fillRect(0, 540, W, H - 540);
-    ctx.fillStyle = '#46603a';
-    ctx.beginPath();
-    ctx.moveTo(0, 560);
-    for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 548 + fnoise(x * 0.01, 8.1) * 26);
-    ctx.lineTo(W, 620); ctx.lineTo(0, 620);
-    ctx.closePath(); ctx.fill();
+    this.drawTerrainScenery();
     // haze rolling over the distant field
     ctx.fillStyle = 'rgba(240,200,140,0.12)';
     for (let i = 0; i < 2; i++) {
@@ -1076,6 +1085,96 @@ const BattleScene = {
     vignette(0.42);
     if (this.phase === 'stance') text('Choose your tactics...', W / 2, 1180, 26, '#e8d8b0');
     else textShadow(`The Battle of ${this.t.name}`, W / 2, 1180, 30, '#ffd75e');
+  },
+  drawHost(cx, dir, color, soldiers, knights) {
+    const total = soldiers + knights;
+    const icons = Math.min(24, total);
+    if (total <= 0) return;
+    const kIcons = total > 0 ? Math.round(icons * knights / total) : 0;
+    let n = 0;
+    for (let row = 0; row < 4 && n < icons; row++) {
+      for (let col = 0; col < 6 && n < icons; col++, n++) {
+        const x = cx + dir * (col * 38) + (row % 2) * 12 * dir;
+        const y = 680 + row * 92;
+        if (n < kIcons) drawMiniKnight(x, y, 2.1, color, dir, this.lunge);
+        else drawSoldier(x, y, 2.1, color, dir, this.lunge);
+      }
+    }
+  },
+  /* area-dependent horizon + battleground */
+  drawTerrainScenery() {
+    const terr = this.terrain;
+    const G = {
+      plain:  ['#5f8a38', '#46682d', '#2c451d'],
+      forest: ['#3f6030', '#2c4a22', '#1c3216'],
+      moor:   ['#6f6a42', '#544a32', '#37301f'],
+      mount:  ['#71705a', '#524d3c', '#322f24'],
+    }[terr] || ['#5f8a38', '#46682d', '#2c451d'];
+
+    if (terr === 'mount') {
+      const ranges = [['#aeb8c2', 466, 70], ['#8b95a0', 492, 96], ['#69707b', 520, 120]];
+      for (const [col, base, amp] of ranges) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 564);
+        for (let x = 0; x <= W; x += 16) ctx.lineTo(x, base - Math.abs(fnoise(x * 0.014 + base, base) - 0.5) * amp * 2);
+        ctx.lineTo(W, 564); ctx.closePath(); ctx.fill();
+      }
+      // snow on the nearest peaks
+      ctx.fillStyle = 'rgba(236,242,246,0.9)';
+      for (let x = 0; x <= W; x += 16) {
+        const py = 520 - Math.abs(fnoise(x * 0.014 + 520, 520) - 0.5) * 240;
+        if (py < 470) { ctx.beginPath(); ctx.moveTo(x - 7, py + 16); ctx.lineTo(x, py); ctx.lineTo(x + 7, py + 16); ctx.closePath(); ctx.fill(); }
+      }
+    } else if (terr === 'forest') {
+      ctx.fillStyle = '#33502a';
+      ctx.beginPath(); ctx.moveTo(0, 560);
+      for (let x = 0; x <= W; x += 28) ctx.lineTo(x, 524 + fnoise(x * 0.008, 3) * 30);
+      ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      // a dense treeline silhouette
+      for (let x = -10; x < W + 20; x += 26) {
+        const h = 30 + fnoise(x * 0.05, 9) * 26;
+        ctx.fillStyle = '#24411e';
+        ctx.beginPath(); ctx.arc(x, 548 - h * 0.4, 18, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#1c1410'; ctx.fillRect(x - 3, 548 - h * 0.4, 6, h);
+      }
+    } else if (terr === 'moor') {
+      const downs = [['#7a6e8a', 500, 0.5], ['#6a6450', 526, 0.85]];
+      for (const [col, base, amp] of downs) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 560);
+        for (let x = 0; x <= W; x += 30) ctx.lineTo(x, base + Math.sin(x * 0.01 + base) * 18 * amp + fnoise(x * 0.01, base) * 20);
+        ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      }
+    } else { // plains — layered green downs
+      const downs = [['#6f9a46', 498], ['#5a8038', 522]];
+      for (const [col, base] of downs) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 560);
+        for (let x = 0; x <= W; x += 36) ctx.lineTo(x, base + Math.sin(x * 0.006 + base) * 16 + fnoise(x * 0.008, base) * 22);
+        ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      }
+    }
+
+    const grd = ctx.createLinearGradient(0, 540, 0, H);
+    grd.addColorStop(0, G[0]); grd.addColorStop(0.5, G[1]); grd.addColorStop(1, G[2]);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 540, W, H - 540);
+    // a rolling near edge of the field
+    ctx.fillStyle = G[0];
+    ctx.beginPath(); ctx.moveTo(0, 560);
+    for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 548 + fnoise(x * 0.01, 8.1) * 24);
+    ctx.lineTo(W, 620); ctx.lineTo(0, 620); ctx.closePath(); ctx.fill();
+
+    // foreground detail keyed to the land
+    const rg = mulberry32(7);
+    if (terr === 'moor') {
+      for (let i = 0; i < 60; i++) { const x = rg() * W, y = 640 + rg() * 560; ctx.fillStyle = rg() < 0.5 ? '#7a4f72' : '#4a5a32'; ctx.fillRect(x, y, 3, 3); }
+    } else if (terr === 'mount') {
+      for (let i = 0; i < 26; i++) { const x = rg() * W, y = 650 + rg() * 560, s = 4 + rg() * 9; ctx.fillStyle = '#6a6452'; ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.arc(x + s * 0.3, y + s * 0.3, s * 0.7, 0, TAU); ctx.fill(); }
+    } else {
+      ctx.strokeStyle = 'rgba(20,40,16,0.5)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 90; i++) { const x = rg() * W, y = 640 + rg() * 560; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + rg() * 4 - 2, y - 6 - rg() * 5); ctx.stroke(); }
+    }
   },
   drawHost(cx, dir, color, soldiers, knights) {
     const total = soldiers + knights;

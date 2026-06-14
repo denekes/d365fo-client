@@ -727,6 +727,40 @@ const DIFFS = [
 
 let S = null; // live game state
 
+/* ---------------- biomes (area-dependent land colour) ---------------- */
+const BIOME = {
+  plain:    ['#4f7d33', '#6fa043', '#93c062'],   // valley → meadow → bright field
+  forest:   ['#244a20', '#356128', '#4d8038'],   // deep wood → canopy → glade
+  moor:     ['#5c6a3a', '#867b48', '#a08a62'],   // boggy green → ochre heath → tan
+  mount:    ['#4c6a36', '#7d7656', '#b6b3a6'],   // green lower slope → rock → bare crag
+  sherwood: ['#1d4520', '#2c6630', '#3f7e3c'],   // the deep greenwood
+};
+function ramp(stops, e) {
+  const n = stops.length - 1;
+  const f = clamp(e, 0, 1) * n;
+  const i = Math.min(n - 1, Math.floor(f));
+  const tt = f - i;
+  const a = hexRGB(stops[i]), b = hexRGB(stops[i + 1]);
+  return [lerp(a[0], b[0], tt), lerp(a[1], b[1], tt), lerp(a[2], b[2], tt)];
+}
+function biomeColor(terrain, e, x, y) {
+  const c = ramp(BIOME[terrain] || BIOME.plain, e);
+  if (terrain === 'mount' && e > 0.8) {            // snow on the high crags
+    const s = (e - 0.8) / 0.2, sn = hexRGB('#e4ebee');
+    c[0] = lerp(c[0], sn[0], s); c[1] = lerp(c[1], sn[1], s); c[2] = lerp(c[2], sn[2], s);
+  } else if (terrain === 'moor') {                 // blooming heather
+    const h = fnoise(x * 0.24 + 5, y * 0.24 + 9);
+    if (h > 0.6) { const hp = hexRGB('#7a4f72'), s = (h - 0.6) / 0.4 * 0.55; c[0] = lerp(c[0], hp[0], s); c[1] = lerp(c[1], hp[1], s); c[2] = lerp(c[2], hp[2], s); }
+  } else if (terrain === 'plain') {                // patchwork of fields
+    const fld = (fnoise(x * 0.13 + 2, y * 0.13 + 8) - 0.5) * 30;
+    c[0] += fld; c[1] += fld * 1.15; c[2] += fld * 0.35;
+  } else if (terrain === 'forest' || terrain === 'sherwood') {
+    const dap = (fnoise(x * 0.2 + 3, y * 0.2 + 1) - 0.5) * 22;
+    c[0] += dap * 0.6; c[1] += dap; c[2] += dap * 0.5;
+  }
+  return c;
+}
+
 /* ---------------- map generation (deterministic) ---------------- */
 const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
@@ -858,22 +892,26 @@ const MapGen = {
     const hc = this.halfCanvas.getContext('2d');
     const img = hc.createImageData(HALFW, HALFH);
     const d = img.data;
-    const base = hexRGB('#cdbd92');
-    const cols = TERR_DEFS.map((def, i) => {
-      if (def.sherwood) { const fg = hexRGB('#2f6e34'); return [fg[0], fg[1], fg[2]]; }
-      const oc = hexRGB(this.ownerColor(i));
-      return [
-        base[0] * 0.55 + oc[0] * 0.45,
-        base[1] * 0.55 + oc[1] * 0.45,
-        base[2] * 0.55 + oc[2] * 0.45,
-      ];
+    // owner colour per province (a light heraldic glaze over the green land)
+    const ownerCol = TERR_DEFS.map((def, i) => {
+      if (def.sherwood) return null;
+      const ow = S ? S.terr[i].owner : -1;
+      return ow < 0 ? null : hexRGB(S.lords[ow].color);
     });
     for (let y = 0; y < HALFH; y++) {
       for (let x = 0; x < HALFW; x++) {
         const o = (y * HALFW + x);
         const t = this.idx[o];
         if (t < 0) { d[o * 4 + 3] = 0; continue; }
-        let [r, g, b] = cols[t];
+        const def = TERR_DEFS[t];
+        const terrain = def.sherwood ? 'sherwood' : def.terrain;
+        // elevation field — mountains reach higher (snow), lowlands stay lush
+        let elev = fnoise(x * 0.05 + t * 2.3, y * 0.05 + t * 1.1);
+        if (terrain === 'mount') elev = clamp(elev * 1.45, 0, 1);
+        let [r, g, b] = biomeColor(terrain, elev, x, y);
+        // a soft wash of the owning lord's colour so holdings still read
+        const oc = ownerCol[t];
+        if (oc) { const k = 0.24; r = r * (1 - k) + oc[0] * k; g = g * (1 - k) + oc[1] * k; b = b * (1 - k) + oc[2] * k; }
         // border / coast shading — bold hand-inked outlines between provinces
         let border = false, coast = false;
         for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
@@ -883,19 +921,20 @@ const MapGen = {
           if (nv < 0) coast = true;
           else if (nv !== t) border = true;
         }
-        if (coast) { r *= 0.40; g *= 0.40; b *= 0.40; }
-        else if (border) { r = r * 0.26 + 14; g = g * 0.26 + 11; b = b * 0.26 + 8; }
-        // embossed relief, exaggerated in the mountains
-        const mFac = TERR_DEFS[t].terrain === 'mount' ? 2.4 : 1;
+        // embossed relief, exaggerated in the hills
+        const mFac = terrain === 'mount' ? 2.8 : terrain === 'moor' ? 1.4 : 1;
         const e1 = fnoise(x * 0.035 + 11, y * 0.035 + 5);
         const e2 = fnoise((x + 1.6) * 0.035 + 11, (y + 1.6) * 0.035 + 5);
-        const relief = (e1 - e2) * 130 * mFac;
-        // warmer light in the south, cooler in the north
-        const warmth = (y / HALFH - 0.45) * 16;
-        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 22 + relief;
-        d[o * 4] = clamp(r + sh + warmth, 0, 255);
-        d[o * 4 + 1] = clamp(g + sh + warmth * 0.4, 0, 255);
-        d[o * 4 + 2] = clamp(b + sh - warmth * 0.5, 0, 255);
+        const relief = (e1 - e2) * 150 * mFac;
+        // warm low sun from the south-west
+        const warmth = (y / HALFH - 0.45) * 14;
+        const sh = (fnoise(x * 0.09, y * 0.09) - 0.5) * 16 + relief;
+        r += sh + warmth; g += sh + warmth * 0.5; b += sh - warmth * 0.5;
+        if (coast) { r *= 0.42; g *= 0.42; b *= 0.42; }
+        else if (border) { r = r * 0.24 + 12; g = g * 0.24 + 12; b = b * 0.24 + 9; }
+        d[o * 4] = clamp(r, 0, 255);
+        d[o * 4 + 1] = clamp(g, 0, 255);
+        d[o * 4 + 2] = clamp(b, 0, 255);
         d[o * 4 + 3] = 255;
       }
     }
@@ -1810,11 +1849,16 @@ const MapScene = {
   render(dt) {
     this.drawSea();
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
+    // cinematic light: warm sun from the south-west, cool depth opposite
+    glow(150, MAPY + 760, 620, 'rgba(255,228,150,0.16)', 0.9);
+    ctx.fillStyle = 'rgba(40,30,70,0.10)';
+    ctx.fillRect(W / 2, MAPY, W / 2, MAPH * 0.5);
     this.drawCloudShadows();
     this.drawRoutes();
     this.drawBanners();
+    this.drawBirds();
     this.drawFrame();
-    vignette(0.3);
+    vignette(0.34);
     this.drawHUD();
     if (this.selected >= 0) this.drawInfo();
     this.drawBottomBar();
@@ -1876,6 +1920,20 @@ const MapScene = {
       ctx.fillStyle = '#e8e0c8';
       ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(12, -6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
       ctx.restore();
+    }
+  },
+
+  drawBirds() {
+    ctx.strokeStyle = 'rgba(30,26,30,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const bx = ((gTime * (16 + i * 5) + i * 190) % (W + 160)) - 80;
+      const by = MAPY + 120 + i * 130 + Math.sin(gTime * 1.5 + i) * 22;
+      const fl = Math.sin(gTime * 6 + i * 2) * 5;
+      ctx.beginPath();
+      ctx.moveTo(bx - 8, by - fl);
+      ctx.quadraticCurveTo(bx, by + 3, bx + 8, by - fl);
+      ctx.stroke();
     }
   },
 
@@ -2178,6 +2236,7 @@ const MapScene = {
 const BattleScene = {
   enter(ti, breach) {
     this.t = S.terr[ti];
+    this.terrain = TERR_DEFS[ti].sherwood ? 'forest' : TERR_DEFS[ti].terrain;
     this.breach = breach;
     this.res = null;
     this.roundI = 0;
@@ -2262,18 +2321,7 @@ const BattleScene = {
       ctx.quadraticCurveTo(bx, by + 4, bx + 9, by - fl);
       ctx.stroke();
     }
-    const ground = ctx.createLinearGradient(0, 540, 0, H);
-    ground.addColorStop(0, '#4c6638');
-    ground.addColorStop(0.5, '#3c5232');
-    ground.addColorStop(1, '#283c24');
-    ctx.fillStyle = ground;
-    ctx.fillRect(0, 540, W, H - 540);
-    ctx.fillStyle = '#46603a';
-    ctx.beginPath();
-    ctx.moveTo(0, 560);
-    for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 548 + fnoise(x * 0.01, 8.1) * 26);
-    ctx.lineTo(W, 620); ctx.lineTo(0, 620);
-    ctx.closePath(); ctx.fill();
+    this.drawTerrainScenery();
     // haze rolling over the distant field
     ctx.fillStyle = 'rgba(240,200,140,0.12)';
     for (let i = 0; i < 2; i++) {
@@ -2304,6 +2352,96 @@ const BattleScene = {
     vignette(0.42);
     if (this.phase === 'stance') text('Choose your tactics...', W / 2, 1180, 26, '#e8d8b0');
     else textShadow(`The Battle of ${this.t.name}`, W / 2, 1180, 30, '#ffd75e');
+  },
+  drawHost(cx, dir, color, soldiers, knights) {
+    const total = soldiers + knights;
+    const icons = Math.min(24, total);
+    if (total <= 0) return;
+    const kIcons = total > 0 ? Math.round(icons * knights / total) : 0;
+    let n = 0;
+    for (let row = 0; row < 4 && n < icons; row++) {
+      for (let col = 0; col < 6 && n < icons; col++, n++) {
+        const x = cx + dir * (col * 38) + (row % 2) * 12 * dir;
+        const y = 680 + row * 92;
+        if (n < kIcons) drawMiniKnight(x, y, 2.1, color, dir, this.lunge);
+        else drawSoldier(x, y, 2.1, color, dir, this.lunge);
+      }
+    }
+  },
+  /* area-dependent horizon + battleground */
+  drawTerrainScenery() {
+    const terr = this.terrain;
+    const G = {
+      plain:  ['#5f8a38', '#46682d', '#2c451d'],
+      forest: ['#3f6030', '#2c4a22', '#1c3216'],
+      moor:   ['#6f6a42', '#544a32', '#37301f'],
+      mount:  ['#71705a', '#524d3c', '#322f24'],
+    }[terr] || ['#5f8a38', '#46682d', '#2c451d'];
+
+    if (terr === 'mount') {
+      const ranges = [['#aeb8c2', 466, 70], ['#8b95a0', 492, 96], ['#69707b', 520, 120]];
+      for (const [col, base, amp] of ranges) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 564);
+        for (let x = 0; x <= W; x += 16) ctx.lineTo(x, base - Math.abs(fnoise(x * 0.014 + base, base) - 0.5) * amp * 2);
+        ctx.lineTo(W, 564); ctx.closePath(); ctx.fill();
+      }
+      // snow on the nearest peaks
+      ctx.fillStyle = 'rgba(236,242,246,0.9)';
+      for (let x = 0; x <= W; x += 16) {
+        const py = 520 - Math.abs(fnoise(x * 0.014 + 520, 520) - 0.5) * 240;
+        if (py < 470) { ctx.beginPath(); ctx.moveTo(x - 7, py + 16); ctx.lineTo(x, py); ctx.lineTo(x + 7, py + 16); ctx.closePath(); ctx.fill(); }
+      }
+    } else if (terr === 'forest') {
+      ctx.fillStyle = '#33502a';
+      ctx.beginPath(); ctx.moveTo(0, 560);
+      for (let x = 0; x <= W; x += 28) ctx.lineTo(x, 524 + fnoise(x * 0.008, 3) * 30);
+      ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      // a dense treeline silhouette
+      for (let x = -10; x < W + 20; x += 26) {
+        const h = 30 + fnoise(x * 0.05, 9) * 26;
+        ctx.fillStyle = '#24411e';
+        ctx.beginPath(); ctx.arc(x, 548 - h * 0.4, 18, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#1c1410'; ctx.fillRect(x - 3, 548 - h * 0.4, 6, h);
+      }
+    } else if (terr === 'moor') {
+      const downs = [['#7a6e8a', 500, 0.5], ['#6a6450', 526, 0.85]];
+      for (const [col, base, amp] of downs) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 560);
+        for (let x = 0; x <= W; x += 30) ctx.lineTo(x, base + Math.sin(x * 0.01 + base) * 18 * amp + fnoise(x * 0.01, base) * 20);
+        ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      }
+    } else { // plains — layered green downs
+      const downs = [['#6f9a46', 498], ['#5a8038', 522]];
+      for (const [col, base] of downs) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, 560);
+        for (let x = 0; x <= W; x += 36) ctx.lineTo(x, base + Math.sin(x * 0.006 + base) * 16 + fnoise(x * 0.008, base) * 22);
+        ctx.lineTo(W, 560); ctx.closePath(); ctx.fill();
+      }
+    }
+
+    const grd = ctx.createLinearGradient(0, 540, 0, H);
+    grd.addColorStop(0, G[0]); grd.addColorStop(0.5, G[1]); grd.addColorStop(1, G[2]);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 540, W, H - 540);
+    // a rolling near edge of the field
+    ctx.fillStyle = G[0];
+    ctx.beginPath(); ctx.moveTo(0, 560);
+    for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 548 + fnoise(x * 0.01, 8.1) * 24);
+    ctx.lineTo(W, 620); ctx.lineTo(0, 620); ctx.closePath(); ctx.fill();
+
+    // foreground detail keyed to the land
+    const rg = mulberry32(7);
+    if (terr === 'moor') {
+      for (let i = 0; i < 60; i++) { const x = rg() * W, y = 640 + rg() * 560; ctx.fillStyle = rg() < 0.5 ? '#7a4f72' : '#4a5a32'; ctx.fillRect(x, y, 3, 3); }
+    } else if (terr === 'mount') {
+      for (let i = 0; i < 26; i++) { const x = rg() * W, y = 650 + rg() * 560, s = 4 + rg() * 9; ctx.fillStyle = '#6a6452'; ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.arc(x + s * 0.3, y + s * 0.3, s * 0.7, 0, TAU); ctx.fill(); }
+    } else {
+      ctx.strokeStyle = 'rgba(20,40,16,0.5)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 90; i++) { const x = rg() * W, y = 640 + rg() * 560; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + rg() * 4 - 2, y - 6 - rg() * 5); ctx.stroke(); }
+    }
   },
   drawHost(cx, dir, color, soldiers, knights) {
     const total = soldiers + knights;
