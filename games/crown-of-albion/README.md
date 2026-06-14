@@ -98,6 +98,11 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
   golden-hour lighting, drifting birds and cloud shadows, layered hazy hills, a
   torch-lit night siege with flaming boulders and braziers, vignettes and
   atmospheric haze on every scene
+- Painted lord portraits on the champion-select screen: each selectable hero has
+  a framed bust drawn with layered skin shading, almond eyes with catchlights,
+  individual hair/beard styles, age lines, circlets or a chain of office, and
+  fur- or steel-trimmed mantles — distinct faces for Sir Aldric, Lady Maren and
+  Sir Corwin (cached, so they render instantly)
 - Hand-shaded characters: armored men-at-arms (mail, plate pauldrons, surcoats,
   heater shields, plumed bascinets), barded warhorses with flowing caparisons and
   crested great-helmed knights bearing couched lances with pennons, and Robin
