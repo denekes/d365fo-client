@@ -822,7 +822,7 @@ function biomeColor(terrain, e, x, y) {
 const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
   area: [], cx: [], cy: [], adj: [],
-  halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null,
+  halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null, shadowCanvas: null,
 
   inIsland(x, y) {
     // wobble the sample point so the coast reads hand-drawn, not vectory
@@ -881,7 +881,28 @@ const MapGen = {
     this.landCanvas.height = MAPH;
     this.makeGrain();
     this.makeFoam();
+    this.makeShadow();
     this.repaint();
+  },
+
+  /* a soft dark silhouette of the island, cast onto the sea to make the
+     landmass read as raised relief floating above the water */
+  makeShadow() {
+    const half = document.createElement('canvas');
+    half.width = HALFW; half.height = HALFH;
+    const hc = half.getContext('2d');
+    const img = hc.createImageData(HALFW, HALFH);
+    const d = img.data;
+    for (let i = 0; i < this.idx.length; i++) {
+      if (this.idx[i] >= 0) { d[i * 4] = 6; d[i * 4 + 1] = 9; d[i * 4 + 2] = 16; d[i * 4 + 3] = 255; }
+    }
+    hc.putImageData(img, 0, 0);
+    this.shadowCanvas = document.createElement('canvas');
+    this.shadowCanvas.width = W; this.shadowCanvas.height = MAPH;
+    const sc = this.shadowCanvas.getContext('2d');
+    sc.imageSmoothingEnabled = true;
+    sc.globalAlpha = 0.34;
+    for (const [ox, oy] of [[0, 0], [3, 3], [-2, 2], [5, 5], [-4, 3]]) sc.drawImage(half, ox, oy, W, MAPH);
   },
 
   makeGrain() {
@@ -2280,6 +2301,13 @@ const MapScene = {
       if (sh.x > W + 40) sh.x = -40;
       if (sh.x < -40) sh.x = W + 40;
     }
+    // dust motes drifting up through the warm light
+    if (Math.random() < 0.12) {
+      spawn(rnd(60, 460), rnd(MAPY + 420, MAPY + 920), {
+        vx: rnd(-6, 7), vy: rnd(-16, -5), g: 0, life: rnd(2.2, 4.2),
+        size: rnd(1.4, 3), color: 'rgba(255,240,200,0.55)', shrink: true,
+      });
+    }
     if (this.aiQueue) {
       this.aiTimer -= dt;
       if (this.aiTimer <= 0) {
@@ -2371,7 +2399,11 @@ const MapScene = {
   /* ---- rendering ---- */
   render(dt) {
     this.drawSea();
+    // the island casts a soft shadow on the sea — it reads as raised relief
+    ctx.drawImage(MapGen.shadowCanvas, 16, MAPY + 20);
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
+    // a faint lit bevel along the north-west coast
+    ctx.globalAlpha = 0.5; ctx.drawImage(MapGen.foamCanvas, -2, MAPY - 3); ctx.globalAlpha = 1;
     // cinematic light: warm sun from the south-west, cool depth opposite
     glow(150, MAPY + 760, 620, 'rgba(255,228,150,0.16)', 0.9);
     ctx.fillStyle = 'rgba(40,30,70,0.10)';
@@ -2380,6 +2412,7 @@ const MapScene = {
     this.drawRoutes();
     this.drawBanners();
     this.drawBirds();
+    this.drawClouds();
     this.drawFrame();
     vignette(0.34);
     this.drawHUD();
@@ -2442,6 +2475,25 @@ const MapScene = {
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -18); ctx.stroke();
       ctx.fillStyle = '#e8e0c8';
       ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(12, -6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  },
+
+  // soft clouds drifting above the realm, offset from their shadows for parallax
+  drawClouds() {
+    for (let i = 0; i < 3; i++) {
+      const x = ((gTime * (8 + i * 3) + i * 320) % (W + 560)) - 280 - 22;
+      const y = MAPY + 180 + i * 290 - 30;
+      ctx.save();
+      ctx.globalAlpha = 0.10;
+      ctx.fillStyle = '#f4f1ea';
+      ctx.beginPath();
+      ctx.ellipse(x, y, 190, 68, 0.2, 0, TAU);
+      ctx.ellipse(x + 120, y + 32, 120, 50, -0.2, 0, TAU);
+      ctx.ellipse(x - 92, y + 20, 90, 40, 0.1, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 0.06; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.ellipse(x - 20, y - 18, 150, 34, 0.15, 0, TAU); ctx.fill();
       ctx.restore();
     }
   },
@@ -2784,6 +2836,13 @@ const BattleScene = {
     this.timer = 0.6;
   },
   update(dt) {
+    // drifting battlefield dust/smoke for atmosphere
+    if (Math.random() < 0.5) {
+      spawn(rnd(40, W - 40), rnd(620, 1040), {
+        vx: rnd(-10, 10), vy: rnd(-22, -8), g: -4, life: rnd(1.6, 3.2),
+        size: rnd(3, 9), color: `rgba(150,135,110,${rnd(0.05, 0.14).toFixed(3)})`, shrink: false,
+      });
+    }
     if (this.phase !== 'fight') return;
     this.lunge = Math.max(0, this.lunge - dt * 4);
     this.timer -= dt;
@@ -2954,15 +3013,34 @@ const BattleScene = {
   drawHost(cx, dir, color, soldiers, knights) {
     const total = soldiers + knights;
     if (total <= 0) return;
+    // war banners planted behind the host
+    for (let b = 0; b < 2; b++) {
+      const bx = cx + dir * (b * 130 + 30), by = 702;
+      ctx.strokeStyle = '#3a2c1c'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by - 100); ctx.stroke();
+      const wv = Math.sin(gTime * 3 + b * 2) * 5;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(bx, by - 100);
+      ctx.quadraticCurveTo(bx + dir * 26, by - 104 + wv, bx + dir * 48, by - 96 + wv);
+      ctx.lineTo(bx + dir * 48, by - 70 + wv * 0.5);
+      ctx.quadraticCurveTo(bx + dir * 26, by - 76 + wv, bx, by - 70);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(color, 0.32); ctx.fillRect(bx + dir * 18, by - 94, 4, 18);
+    }
     const icons = Math.min(12, total);
     const kIcons = Math.round(icons * knights / total);
     let n = 0;
     for (let row = 0; row < 3 && n < icons; row++) {
       for (let col = 0; col < 4 && n < icons; col++, n++) {
-        const x = cx + dir * (col * 60) + (row % 2) * 24 * dir;
-        const y = 712 + row * 96;
-        if (n < kIcons) drawMiniKnight(x, y, 2.0, color, dir, this.lunge);
-        else drawSoldier(x, y, 2.2, color, dir, this.lunge);
+        const ph = n * 1.3;
+        const bob = Math.sin(gTime * 2.2 + ph) * 2.2;
+        const sway = Math.cos(gTime * 1.4 + ph) * 1.4 * dir;
+        const x = cx + dir * (col * 60) + (row % 2) * 24 * dir + sway;
+        const y = 712 + row * 96 + bob;
+        const sc = 1 + row * 0.07;          // nearer ranks loom slightly larger
+        if (n < kIcons) drawMiniKnight(x, y, 2.0 * sc, color, dir, this.lunge);
+        else drawSoldier(x, y, 2.2 * sc, color, dir, this.lunge);
       }
     }
   },

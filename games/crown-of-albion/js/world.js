@@ -117,7 +117,7 @@ function biomeColor(terrain, e, x, y) {
 const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
   area: [], cx: [], cy: [], adj: [],
-  halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null,
+  halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null, shadowCanvas: null,
 
   inIsland(x, y) {
     // wobble the sample point so the coast reads hand-drawn, not vectory
@@ -176,7 +176,28 @@ const MapGen = {
     this.landCanvas.height = MAPH;
     this.makeGrain();
     this.makeFoam();
+    this.makeShadow();
     this.repaint();
+  },
+
+  /* a soft dark silhouette of the island, cast onto the sea to make the
+     landmass read as raised relief floating above the water */
+  makeShadow() {
+    const half = document.createElement('canvas');
+    half.width = HALFW; half.height = HALFH;
+    const hc = half.getContext('2d');
+    const img = hc.createImageData(HALFW, HALFH);
+    const d = img.data;
+    for (let i = 0; i < this.idx.length; i++) {
+      if (this.idx[i] >= 0) { d[i * 4] = 6; d[i * 4 + 1] = 9; d[i * 4 + 2] = 16; d[i * 4 + 3] = 255; }
+    }
+    hc.putImageData(img, 0, 0);
+    this.shadowCanvas = document.createElement('canvas');
+    this.shadowCanvas.width = W; this.shadowCanvas.height = MAPH;
+    const sc = this.shadowCanvas.getContext('2d');
+    sc.imageSmoothingEnabled = true;
+    sc.globalAlpha = 0.34;
+    for (const [ox, oy] of [[0, 0], [3, 3], [-2, 2], [5, 5], [-4, 3]]) sc.drawImage(half, ox, oy, W, MAPH);
   },
 
   makeGrain() {
