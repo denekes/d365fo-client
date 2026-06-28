@@ -568,6 +568,7 @@ const Modal = {
 /* ---------------- scene & loop ---------------- */
 let scene = null, gTime = 0, shake = 0;
 let timeScale = 1, slowMoT = 0;
+let figSheen = 0.16;   // how strongly baked figures catch the scene light
 function slowMo(scale, dur) { timeScale = scale; slowMoT = dur; }
 function setScene(s, ...args) {
   if (scene && scene.exit) scene.exit();

@@ -191,7 +191,18 @@ function bakeFigure(key, box, paint) {
   ctx.translate(box.ox, box.oy);
   paint();
   ctx = prev;
-  const spr = { c, ox: box.ox, oy: box.oy };
+  // a directional light mask: the figure's silhouette filled with a
+  // top-left → fade gradient, so we can add a moving sheen at blit time
+  const lc = document.createElement('canvas');
+  lc.width = box.w; lc.height = box.h;
+  const lx = lc.getContext('2d');
+  lx.drawImage(c, 0, 0);
+  lx.globalCompositeOperation = 'source-atop';
+  const lg = lx.createLinearGradient(0, 0, box.w * 0.9, box.h);
+  lg.addColorStop(0, 'rgba(255,250,236,0.95)');
+  lg.addColorStop(0.42, 'rgba(255,250,236,0)');
+  lx.fillStyle = lg; lx.fillRect(0, 0, box.w, box.h);
+  const spr = { c, light: lc, ox: box.ox, oy: box.oy };
   _figCache[key] = spr;
   return spr;
 }
@@ -201,6 +212,12 @@ function blitFigure(spr, x, y, scale, dir) {
   ctx.scale(dir, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(spr.c, -spr.ox * scale, -spr.oy * scale, spr.c.width * scale, spr.c.height * scale);
+  const L = figSheen * (0.62 + 0.38 * Math.sin(gTime * 2 + x * 0.05));
+  if (L > 0.01 && spr.light) {
+    ctx.globalAlpha = L;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(spr.light, -spr.ox * scale, -spr.oy * scale, spr.light.width * scale, spr.light.height * scale);
+  }
   ctx.restore();
 }
 
@@ -921,10 +938,38 @@ const MapScene = {
   aiTimer: 0,
   ships: [{ x: 80, y: 940, v: 8 }, { x: 600, y: 250, v: -6 }],
 
+  cam: { fx: 360, fy: 620, scale: 1.04 },
+
   enter() {
     this.selected = -1;
     this.recruitOpen = false;
     this.aiQueue = null;
+    this.cam = { fx: 360, fy: 620, scale: 1.04 };
+  },
+
+  /* camera: a slow Ken-Burns drift that eases to focus a selected province */
+  updateCam(dt) {
+    let tFx, tFy, tScale;
+    if (this.selected >= 0) {
+      const [sx, sy] = MapGen.center(this.selected);
+      tFx = sx; tFy = clamp(sy, MAPY + 220, MAPY + MAPH - 220); tScale = 1.18;
+    } else {
+      tFx = 360 + Math.sin(gTime * 0.07) * 42;
+      tFy = 620 + Math.cos(gTime * 0.05) * 64;
+      tScale = 1.05 + Math.sin(gTime * 0.06) * 0.02;
+    }
+    const k = Math.min(1, dt * 3.2);
+    this.cam.fx += (tFx - this.cam.fx) * k;
+    this.cam.fy += (tFy - this.cam.fy) * k;
+    this.cam.scale += (tScale - this.cam.scale) * k;
+  },
+  applyCam() {
+    ctx.translate(360, 620);
+    ctx.scale(this.cam.scale, this.cam.scale);
+    ctx.translate(-this.cam.fx, -this.cam.fy);
+  },
+  camInverse(x, y) {
+    return [(x - 360) / this.cam.scale + this.cam.fx, (y - 620) / this.cam.scale + this.cam.fy];
   },
 
   /* ---- turn flow ---- */
@@ -951,6 +996,7 @@ const MapScene = {
   },
 
   update(dt) {
+    this.updateCam(dt);
     for (const sh of this.ships) {
       sh.x += sh.v * dt;
       if (sh.x > W + 40) sh.x = -40;
@@ -1053,13 +1099,16 @@ const MapScene = {
 
   /* ---- rendering ---- */
   render(dt) {
-    this.drawSea();
+    figSheen = 0.16;
+    this.drawSea();   // static full-screen sea backdrop (camera moves the island over it)
+    ctx.save();
+    roundRect(8, MAPY - 2, W - 16, MAPH + 4, 18); ctx.clip();
+    this.applyCam();
     // the island casts a soft shadow on the sea — it reads as raised relief
     ctx.drawImage(MapGen.shadowCanvas, 16, MAPY + 20);
     ctx.drawImage(MapGen.landCanvas, 0, MAPY);
     // a faint lit bevel along the north-west coast
     ctx.globalAlpha = 0.5; ctx.drawImage(MapGen.foamCanvas, -2, MAPY - 3); ctx.globalAlpha = 1;
-    // cinematic light: warm sun from the south-west, cool depth opposite
     glow(150, MAPY + 760, 620, 'rgba(255,228,150,0.16)', 0.9);
     ctx.fillStyle = 'rgba(40,30,70,0.10)';
     ctx.fillRect(W / 2, MAPY, W / 2, MAPH * 0.5);
@@ -1068,6 +1117,8 @@ const MapScene = {
     this.drawBanners();
     this.drawBirds();
     this.drawClouds();
+    ctx.restore();
+    this.drawWeather();   // season tint + fog + rain/snow, in screen space
     this.drawFrame();
     vignette(0.34);
     this.drawHUD();
@@ -1151,6 +1202,47 @@ const MapScene = {
       ctx.beginPath(); ctx.ellipse(x - 20, y - 18, 150, 34, 0.15, 0, TAU); ctx.fill();
       ctx.restore();
     }
+  },
+
+  /* time-of-day tint by season, drifting fog, and seasonal precipitation */
+  drawWeather() {
+    ctx.save();
+    roundRect(8, MAPY - 2, W - 16, MAPH + 4, 18); ctx.clip();
+    const m = S ? S.month % 12 : 5;
+    const winter = (m === 11 || m <= 1), spring = (m >= 2 && m <= 4), summer = (m >= 5 && m <= 7);
+    const tint = winter ? ['#34508c', 0.20] : spring ? ['#9fc06a', 0.05] : summer ? ['#ffe08a', 0.05] : ['#d0862e', 0.14];
+    ctx.globalAlpha = tint[1]; ctx.fillStyle = tint[0]; ctx.fillRect(8, MAPY, W - 16, MAPH); ctx.globalAlpha = 1;
+    // low fog banks drifting over the coasts
+    const fogN = winter ? 4 : 2;
+    for (let i = 0; i < fogN; i++) {
+      const x = ((gTime * (10 + i * 4) + i * 260) % (W + 560)) - 280;
+      const y = MAPY + 240 + i * 230;
+      ctx.globalAlpha = 0.07;
+      ctx.fillStyle = winter ? '#dfe6ef' : '#e8e2d2';
+      ctx.beginPath();
+      ctx.ellipse(x, y, 230, 46, 0, 0, TAU);
+      ctx.ellipse(x + 150, y + 22, 150, 36, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // seasonal precipitation
+    if (winter) {              // snow across the realm, denser in the north
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      for (let i = 0; i < 80; i++) {
+        const sx = (i * 97.3 + gTime * 9 + Math.sin(gTime * 0.8 + i) * 14) % (W - 16) + 8;
+        const sy = MAPY + (i * 53.7 + gTime * 46) % MAPH;
+        const r = 1.4 + (i % 3) * 0.7;
+        ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
+      }
+    } else if (!summer && !spring) {   // autumn rain in the north
+      ctx.strokeStyle = 'rgba(190,205,225,0.32)'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 64; i++) {
+        const sx = (i * 113.1 + gTime * 90) % (W - 16) + 8;
+        const sy = MAPY + (i * 71.3 + gTime * 620) % (MAPH * 0.55);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - 5, sy + 16); ctx.stroke();
+      }
+    }
+    ctx.restore();
   },
 
   drawBirds() {
@@ -1452,7 +1544,9 @@ const MapScene = {
     if (!b && this.selected >= 0) b = btnAt(this.infoBtns || [], x, y);
     if (b) { Sfx.tap(); b.fn(); return; }
     if (this.selected >= 0 && y >= 815 && y <= 1045) return; // tap inside info panel
-    const t = MapGen.terrAt(x, y);
+    // the island is drawn through the camera, so invert the tap to map space
+    const [mx, my] = this.camInverse(x, y);
+    const t = MapGen.terrAt(mx, my);
     if (t >= 0) {
       this.selected = (t === this.selected) ? -1 : t;
       Sfx.tap();
@@ -1535,6 +1629,7 @@ const BattleScene = {
     });
   },
   render() {
+    figSheen = 0.24;
     // golden-hour battlefield
     const sky = ctx.createLinearGradient(0, 0, 0, 560);
     sky.addColorStop(0, '#503a5e');
@@ -2084,6 +2179,7 @@ const SiegeScene = {
     Sfx.thud();
   },
   render() {
+    figSheen = 0.14;
     // a siege by night
     const sky = ctx.createLinearGradient(0, 0, 0, 700);
     sky.addColorStop(0, '#070b1e');
@@ -2348,6 +2444,7 @@ const RaidScene = {
     });
   },
   render() {
+    figSheen = 0.12;
     // moonlit courtyard
     ctx.fillStyle = skyGradient(0, H, '#101428', '#1c1830');
     ctx.fillRect(0, 0, W, H);
@@ -2502,6 +2599,7 @@ const ArcheryScene = {
     });
   },
   render() {
+    figSheen = 0.18;
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, '#2a401f');
     sky.addColorStop(0.5, '#37512a');
