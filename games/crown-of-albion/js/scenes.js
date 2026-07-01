@@ -1104,11 +1104,14 @@ const MapScene = {
     ctx.save();
     roundRect(8, MAPY - 2, W - 16, MAPH + 4, 18); ctx.clip();
     this.applyCam();
-    // the island casts a soft shadow on the sea — it reads as raised relief
-    ctx.drawImage(MapGen.shadowCanvas, 16, MAPY + 20);
-    ctx.drawImage(MapGen.landCanvas, 0, MAPY);
-    // a faint lit bevel along the north-west coast
-    ctx.globalAlpha = 0.5; ctx.drawImage(MapGen.foamCanvas, -2, MAPY - 3); ctx.globalAlpha = 1;
+    // shadow + land + bevel, composited at repaint time into one image
+    ctx.drawImage(MapGen.islandCanvas, 0, MAPY);
+    // animated surf hugging the coast — drawn in camera space so it stays
+    // aligned with the shoreline when the view zooms in
+    ctx.globalAlpha = 0.45 + 0.2 * Math.sin(gTime * 1.1);
+    ctx.drawImage(MapGen.foamCanvas, 0, MAPY);
+    ctx.globalAlpha = 1;
+    this.drawShips();
     glow(150, MAPY + 760, 620, 'rgba(255,228,150,0.16)', 0.9);
     ctx.fillStyle = 'rgba(40,30,70,0.10)';
     ctx.fillRect(W / 2, MAPY, W / 2, MAPH * 0.5);
@@ -1133,12 +1136,15 @@ const MapScene = {
   },
 
   drawSea() {
-    // deep water with a warm sun-glint band
-    const g = ctx.createLinearGradient(0, MAPY, 0, MAPY + MAPH);
-    g.addColorStop(0, '#1d3b58');
-    g.addColorStop(0.45, '#27506e');
-    g.addColorStop(1, '#122a42');
-    ctx.fillStyle = g;
+    // deep water with a warm sun-glint band (gradient cached across frames)
+    if (!this._seaGrad) {
+      const g = ctx.createLinearGradient(0, MAPY, 0, MAPY + MAPH);
+      g.addColorStop(0, '#1d3b58');
+      g.addColorStop(0.45, '#27506e');
+      g.addColorStop(1, '#122a42');
+      this._seaGrad = g;
+    }
+    ctx.fillStyle = this._seaGrad;
     ctx.fillRect(0, 0, W, H);
     glow(560, MAPY + 180, 320, 'rgba(255,214,140,0.35)', 0.5);
     if (!this.glints) {
@@ -1164,9 +1170,9 @@ const MapScene = {
       }
       ctx.stroke();
     }
-    ctx.globalAlpha = 0.45 + 0.2 * Math.sin(gTime * 1.1);
-    ctx.drawImage(MapGen.foamCanvas, 0, MAPY);
-    ctx.globalAlpha = 1;
+  },
+
+  drawShips() {
     for (const sh of this.ships) {
       if (MapGen.terrAt(sh.x, sh.y) >= 0) continue; // don't sail over land
       const bob = Math.sin(gTime * 2 + sh.x) * 3;

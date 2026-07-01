@@ -612,12 +612,23 @@ function resize() {
 }
 
 /* ---------------- cinematic helpers ---------------- */
+const _vigCache = {};
 function vignette(strength = 0.4) {
-  const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.74);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, `rgba(8,6,14,${strength})`);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  // building a radial gradient every frame is costly; bake once per strength
+  const key = strength.toFixed(2);
+  let c = _vigCache[key];
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = W / 2; c.height = H / 2;
+    const vc = c.getContext('2d');
+    const g = vc.createRadialGradient(W / 4, H / 4, H * 0.15, W / 4, H / 4, H * 0.37);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `rgba(8,6,14,${strength})`);
+    vc.fillStyle = g;
+    vc.fillRect(0, 0, c.width, c.height);
+    _vigCache[key] = c;
+  }
+  ctx.drawImage(c, 0, 0, W, H);
 }
 function letterbox(k) {
   if (k <= 0) return;

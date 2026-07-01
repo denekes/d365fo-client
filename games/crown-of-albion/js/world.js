@@ -118,6 +118,7 @@ const MapGen = {
   idx: null,            // Int8Array, HALFW*HALFH, territory id or -1 = sea
   area: [], cx: [], cy: [], adj: [],
   halfCanvas: null, landCanvas: null, grainCanvas: null, foamCanvas: null, shadowCanvas: null,
+  islandCanvas: null,   // shadow + land + coast bevel composited, one blit per frame
 
   inIsland(x, y) {
     // wobble the sample point so the coast reads hand-drawn, not vectory
@@ -318,6 +319,20 @@ const MapGen = {
     lc.drawImage(this.halfCanvas, 0, 0, W, MAPH);
     lc.drawImage(this.grainCanvas, 0, 0);
     this.decorate(lc);
+    // composite the static island layers once, so the map scene draws a
+    // single image per frame instead of shadow + land + bevel separately
+    if (!this.islandCanvas) {
+      this.islandCanvas = document.createElement('canvas');
+      this.islandCanvas.width = W;
+      this.islandCanvas.height = MAPH;
+    }
+    const ic = this.islandCanvas.getContext('2d');
+    ic.clearRect(0, 0, W, MAPH);
+    ic.drawImage(this.shadowCanvas, 16, 20);
+    ic.drawImage(this.landCanvas, 0, 0);
+    ic.globalAlpha = 0.5;
+    ic.drawImage(this.foamCanvas, -2, -3);   // lit bevel along the north-west coast
+    ic.globalAlpha = 1;
   },
 
   /* hand-inked terrain icons, medieval-chart style */
