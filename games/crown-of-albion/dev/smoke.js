@@ -190,7 +190,25 @@ vm.runInContext(`
       }
     }
     setScene(RaidScene, S.lords[1]); Modal.close();
+    // gesture classification: a short 30px right-swipe must count as 'right',
+    // a slow long swipe must still register, and a still tap as 'tap'
     scene.nextPrompt();
+    scene.prompt = 'right';
+    const hp1 = scene.ehp;
+    scene.onDown(300, 600); scene.onUp(330, 604);          // short flick right
+    __r.raidShortSwipe = scene.ehp === hp1 - 1;
+    scene.update(0.9); // leave 'hit'
+    if (scene.phase !== 'prompt') scene.nextPrompt();
+    scene.prompt = 'left';
+    const hp2 = scene.ehp;
+    scene.onDown(500, 600); scene.onUp(200, 640);          // long (slow) swipe left
+    __r.raidLongSwipe = scene.ehp === hp2 - 1;
+    scene.update(0.9);
+    if (scene.phase !== 'prompt') scene.nextPrompt();
+    scene.prompt = 'tap';
+    const hp3 = scene.ehp;
+    scene.onDown(360, 600); scene.onUp(365, 603);          // a still tap
+    __r.raidTap = scene.ehp === hp3 - 1;
     for (let i = 0; i < 600 && scene === RaidScene && scene.phase !== 'done'; i++) {
       scene.update(0.016); scene.render(0.016);
       if (scene.phase === 'prompt') scene.resolve(true);
@@ -235,6 +253,9 @@ check('ai: rivals expand', r.aiExpanded);
 check('sherwood: stays free after 40 AI months', r.sherwoodStaysFree);
 check('rules: losing all land eliminates a lord', r.elim);
 check('save: load round-trips', r.load);
+check('raid: a short 30px flick registers as a swipe', r.raidShortSwipe);
+check('raid: a long slow swipe registers', r.raidLongSwipe);
+check('raid: a still tap registers as a tap', r.raidTap);
 check('scenes: all scenes run without throwing', r.scenes);
 if (r.sceneErr) console.error(r.sceneErr);
 

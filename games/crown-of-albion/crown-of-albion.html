@@ -2434,7 +2434,10 @@ const MapScene = {
     Modal.show({
       title: 'A Grand Tournament',
       lines: 'Send a herald — which lord do you challenge to the tilt?',
-      buttons: foes.map(f => ({ label: f.name, fn: () => this.pickWager(f) })),
+      buttons: [
+        ...foes.map(f => ({ label: f.name, fn: () => this.pickWager(f) })),
+        { label: 'Never Mind', fn: () => {} },
+      ],
     });
   },
   pickWager(foe) {
@@ -2462,10 +2465,13 @@ const MapScene = {
     Modal.show({
       title: 'A Night Raid',
       lines: 'Steal into an enemy treasury under cover of dark. Whose gold do you covet?',
-      buttons: foes.map(f => ({
-        label: `${f.name} (${f.gold}g)`,
-        fn: () => { S.actionUsed = true; setScene(RaidScene, f); },
-      })),
+      buttons: [
+        ...foes.map(f => ({
+          label: `${f.name} (${f.gold}g)`,
+          fn: () => { S.actionUsed = true; setScene(RaidScene, f); },
+        })),
+        { label: 'Never Mind', fn: () => {} },
+      ],
     });
   },
 
@@ -3765,8 +3771,9 @@ const RaidScene = {
     this.round++;
     this.phase = 'prompt';
     this.prompt = pick(['left', 'right', 'tap']);
-    this.window = Math.max(0.55, 1.15 - this.round * 0.07);
+    this.window = Math.max(0.7, 1.4 - this.round * 0.08);
     this.t = 0;
+    this._sw = null;
   },
   resolve(ok) {
     if (this.phase !== 'prompt') return;
@@ -3801,11 +3808,14 @@ const RaidScene = {
     const won = this.ehp <= 0;
     let lines;
     if (won) {
-      const loot = Math.max(15, Math.round(this.foe.gold * 0.45));
-      this.foe.gold = Math.max(0, this.foe.gold - loot);
+      // never rob more gold than the foe actually has
+      const loot = Math.min(this.foe.gold, Math.max(15, Math.round(this.foe.gold * 0.45)));
+      this.foe.gold -= loot;
       p.gold += loot;
       p.fame += 6;
-      lines = `The guard yields! You escape over the wall with ${loot} gold from the coffers of ${this.foe.name}.`;
+      lines = loot > 0
+        ? `The guard yields! You escape over the wall with ${loot} gold from the coffers of ${this.foe.name}.`
+        : `The guard yields — but the coffers of ${this.foe.name} are all but empty. At least the tale will be told.`;
       Sfx.fanfare();
     } else {
       const ransom = Math.round(p.gold * 0.25);
@@ -3899,8 +3909,19 @@ const RaidScene = {
     }
     textShadow(`Round ${this.round}`, W / 2, 1190, 24, '#cbbf9f');
   },
-  onTap() { if (this.phase === 'prompt') this.resolve(this.prompt === 'tap'); },
-  onSwipe(dir) { if (this.phase === 'prompt') this.resolve(this.prompt === dir); },
+  /* the raid classifies gestures itself: the global tap/swipe thresholds
+     leave dead zones (24–50px moves, slow swipes) that read as misses */
+  onDown(x, y) { this._sw = { x, y }; },
+  onUp(x, y) {
+    if (this.phase !== 'prompt' || !this._sw) return;
+    const dx = x - this._sw.x, dy = y - this._sw.y;
+    this._sw = null;
+    let g;
+    if (Math.hypot(dx, dy) < 26) g = 'tap';
+    else if (Math.abs(dx) >= Math.abs(dy)) g = dx > 0 ? 'right' : 'left';
+    else g = 'vertical';
+    this.resolve(g === this.prompt);
+  },
 };
 
 /* ---------------- Robin Hood: the contest of the bow ---------------- */
