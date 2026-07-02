@@ -111,6 +111,37 @@ vm.runInContext(`
   const aid = grantRobinAid(26);
   __r.robinAid = S.lords[0].army.s > beforeS && aid.men > 0 && sherwoodCooldown() > 0;
 
+  // hosts: every lord's army starts stationed at its home province
+  __r.hostsAtHome = S.lords.every((l, i) => l.army.loc === HOME_TERRS[i]);
+  // hosts: a stationed host makes its province far harder to take
+  const defended = S.terr[HOME_TERRS[1]];           // Lothian, AI home with host
+  S.lords[1].army.s = 20; S.lords[1].army.k = 4;
+  let winsVsHost = 0, winsVsGarrison = 0;
+  for (let i = 0; i < 80; i++) {
+    S.lords[1].army.loc = defended.id;              // host at home
+    if (simBattle(S.lords[0], { s: 25, k: 3 }, defended, 0, 1).win) winsVsHost++;
+    S.lords[1].army.loc = -1;                       // host away
+    if (simBattle(S.lords[0], { s: 25, k: 3 }, defended, 0, 1).win) winsVsGarrison++;
+  }
+  S.lords[1].army.loc = HOME_TERRS[1];
+  S.lords[1].army.s = 10; S.lords[1].army.k = 2;
+  __r.hostDefends = winsVsHost < winsVsGarrison - 10;
+  // hosts: capturing a province with the enemy host in it forces a retreat
+  const victim2 = S.lords[1];
+  const homeT = S.terr[HOME_TERRS[1]];
+  const other = S.terr.find(t => t.owner === -1 && !t.sherwood);
+  other.owner = 1;                                   // give the AI a fallback province
+  victim2.army.loc = homeT.id;
+  const resCap = { win: true, as: 20, ak: 2, dg: 0, dhs: 0, dhk: 0, hadHost: true, rounds: [] };
+  applyBattle(S.lords[0], homeT, resCap);
+  __r.hostRetreats = victim2.army.loc === other.id && S.lords[0].army.loc === homeT.id;
+  // put the world back for the checks that follow
+  homeT.owner = 1; other.owner = -1; victim2.alive = true;
+  victim2.army = { s: 10, k: 2, c: 0, loc: homeT.id };
+  S.lords[0].army.loc = HOME_TERRS[0];
+  S.terr.forEach(t => { if (t.owner === 0 && t.id !== HOME_TERRS[0]) t.owner = -1; });
+  MapGen.repaint();
+
   // battle math: a big host should beat a small garrison nearly always
   let wins = 0;
   for (let i = 0; i < 60; i++) {
@@ -140,6 +171,8 @@ vm.runInContext(`
     advanceMonth();
   }
   __r.consistent = S.terr.every(t => t.owner >= -1 && t.owner < 4 && t.garrison >= 0);
+  __r.hostsValid = S.lords.every(l => !l.alive || lordTerrs(l.id).length === 0 ||
+    (l.army.loc >= 0 && S.terr[l.army.loc].owner === l.id));
   __r.aliveSync = S.lords.every(l => l.isPlayer || l.alive === (S.terr.some(t => t.owner === l.id)));
   __r.aiExpanded = S.terr.filter(t => t.owner > 0).length > 3;
   __r.sherwoodStaysFree = S.terr[SHERWOOD].owner === -1;  // AI never took it over 40 months
@@ -244,10 +277,14 @@ check('sherwood: has land borders', r.sherwoodHasLandBorder);
 check('sherwood: is never a march target', r.sherwoodSafe);
 check('map: land adjacency is symmetric', r.adjSymmetric);
 check('robin: aid grants Merry Men, loot and a cooldown', r.robinAid);
+check('hosts: armies start stationed at home', r.hostsAtHome);
+check('hosts: a stationed host defends its province', r.hostDefends);
+check('hosts: a routed host retreats to friendly soil', r.hostRetreats);
 check('battle: strong host wins', r.battleStrongWins);
 check('battle: weak host loses vs fortress', r.battleWeakLoses);
 check('battle: breached walls help the attacker', r.breachHelps);
 check('ai: 40 months leave world consistent', r.consistent);
+check('hosts: still on friendly soil after 40 months', r.hostsValid);
 check('ai: alive flag matches holdings', r.aliveSync);
 check('ai: rivals expand', r.aiExpanded);
 check('sherwood: stays free after 40 AI months', r.sherwoodStaysFree);

@@ -559,8 +559,8 @@ const TitleScene = {
     ctx.shadowBlur = 40 * pulse;
     drawCrown(W / 2, 300, 70 * pulse);
     ctx.restore();
-    textShadow('CROWN', W / 2, 470, 92, '#ffd75e');
-    textShadow('of ALBION', W / 2, 560, 64, '#e8c25e');
+    titleText('CROWN', W / 2, 470, 92);
+    titleText('of ALBION', W / 2, 560, 64);
     text('~ A Medieval Saga of Conquest ~', W / 2, 640, 28, '#b9a8d8');
     this.layoutButtons();
     for (const b of this.buttons) drawBtn(b);
@@ -865,7 +865,7 @@ const SelectScene = {
   render() {
     ctx.fillStyle = skyGradient(0, H, '#1c1626', '#0e0c16');
     ctx.fillRect(0, 0, W, H);
-    textShadow('Choose Your Champion', W / 2, 90, 44, '#ffd75e');
+    titleText('Choose Your Champion', W / 2, 90, 44);
     text('Each hero excels at a different path to the crown.', W / 2, 145, 24, '#cbbf9f');
     this.cards = [];
     HEROES.forEach((h, i) => {
@@ -1398,6 +1398,25 @@ const MapScene = {
       }
       if (t.owner === 0) drawCrown(x, y - 44, 8);
     }
+    // stationed hosts: a shield badge with crossed blades beside the banner
+    for (const l of S.lords) {
+      if (!l.alive || l.army.loc === undefined || l.army.loc < 0) continue;
+      if (S.terr[l.army.loc].owner !== l.id || armySize(l.army) <= 0) continue;
+      const [x, y] = MapGen.center(l.army.loc);
+      const bx = x + 34, by = y + 22;
+      ctx.fillStyle = shade(l.color, -0.3);
+      ctx.beginPath();
+      ctx.moveTo(bx - 12, by - 12); ctx.lineTo(bx + 12, by - 12); ctx.lineTo(bx + 12, by + 2);
+      ctx.quadraticCurveTo(bx, by + 15, bx - 12, by + 2);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = l.isPlayer ? '#ffd75e' : '#e8d8a8';
+      ctx.lineWidth = l.isPlayer ? 2.5 : 1.5;
+      ctx.stroke();
+      ctx.strokeStyle = '#e8e8f0'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(bx - 6, by + 4); ctx.lineTo(bx + 6, by - 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx + 6, by + 4); ctx.lineTo(bx - 6, by - 8); ctx.stroke();
+      textShadow(String(armySize(l.army)), bx, by - 21, 16, l.isPlayer ? '#ffe9a0' : '#d8ccb0');
+    }
   },
 
   drawHUD() {
@@ -1409,7 +1428,8 @@ const MapScene = {
     text(dateStr(), 52, 68, 21, '#cbbf9f', 'left');
     const provs = lordTerrs(0).length;
     const totalProvs = S.terr.filter(t => !t.sherwood).length;
-    text(`${provs} / ${totalProvs} provinces`, 52, 94, 19, provs >= totalProvs - 2 ? '#ffd75e' : '#a89c80', 'left');
+    const hostName = (p.army.loc >= 0 && S.terr[p.army.loc]) ? S.terr[p.army.loc].name : '—';
+    text(`${provs} / ${totalProvs} provinces  ·  ⚑ ${hostName}`, 52, 94, 19, provs >= totalProvs - 2 ? '#ffd75e' : '#a89c80', 'left');
     drawCoin(420, 34);
     textShadow(String(p.gold), 440, 34, 25, '#ffe9a0', 'left');
     drawStar(420, 70, 11);
@@ -1451,7 +1471,10 @@ const MapScene = {
   drawInfo() {
     const t = S.terr[this.selected];
     if (t.sherwood) { this.drawSherwood(); return; }
-    const x = 30, y = 815, w = W - 60, h = 230;
+    const p = player();
+    const mine = t.owner === 0;
+    const hostHere = mine && p.army.loc === t.id;
+    const x = 30, y = mine ? 775 : 815, w = W - 60, h = mine ? 340 : 230;
     panel(x, y, w, h);
     const ownerName = t.owner < 0 ? 'No banner (free folk)' : S.lords[t.owner].name;
     const col = t.owner < 0 ? NEUTRAL_COLOR : S.lords[t.owner].color;
@@ -1459,11 +1482,11 @@ const MapScene = {
     roundRect(x + 24, y + 22, 12, 56, 4); ctx.fill();
     textShadow(t.name, x + 50, y + 38, 30, '#f5e9c8', 'left');
     text(ownerName, x + 50, y + 70, 21, '#cbbf9f', 'left');
-    text(`Garrison ${t.garrison}   Income ${t.income}g   ${t.castle ? (t.castle > 1 ? 'Great Castle' : 'Castle') : 'No castle'}`,
-      x + 24, y + 106, 21, '#e8d8b0', 'left');
+    const enemyHost = !mine && hostAt(t.id);
+    text(`Garrison ${t.garrison}${enemyHost ? ' + their host!' : ''}   Income ${t.income}g   ${t.castle ? (t.castle > 1 ? 'Great Castle' : 'Castle') : 'No castle'}`,
+      x + 24, y + 106, 21, enemyHost ? '#ffb0a0' : '#e8d8b0', 'left');
     this.infoBtns = [];
-    const p = player();
-    if (t.owner === 0) {
+    if (mine) {
       const b1 = makeBtn(x + 20, y + 134, 200, 64, `+5 Men ${COSTS.garrison}g`, () => {
         if (p.gold < COSTS.garrison) { toast('Not enough gold.'); return; }
         p.gold -= COSTS.garrison; t.garrison += 5; Sfx.coin(); saveGame();
@@ -1478,6 +1501,33 @@ const MapScene = {
         }, { size: 21 });
         b2.enabled = p.gold >= COSTS.castle;
         this.infoBtns.push(b2);
+      }
+      // the host: station it here, or shift men between host and garrison
+      if (hostHere) {
+        text(`⚑ Your host is camped here — it will defend ${t.name}.`, x + 24, y + 222, 20, '#b8e8a8', 'left');
+        const b3 = makeBtn(x + 20, y + 246, 212, 62, '5 Host → Garrison', () => {
+          const n = Math.min(5, p.army.s);
+          if (n <= 0) { toast('No soldiers left in the host.'); return; }
+          p.army.s -= n; t.garrison += n; Sfx.tap(); saveGame();
+        }, { size: 20 });
+        b3.enabled = p.army.s > 0;
+        this.infoBtns.push(b3);
+        const b4 = makeBtn(x + 244, y + 246, 212, 62, '5 Garrison → Host', () => {
+          const n = Math.min(5, t.garrison - 1);
+          if (n <= 0) { toast('The garrison cannot be emptied.'); return; }
+          t.garrison -= n; p.army.s += n; Sfx.tap(); saveGame();
+        }, { size: 20 });
+        b4.enabled = t.garrison > 1;
+        this.infoBtns.push(b4);
+      } else {
+        text(`Your host is camped at ${S.terr[p.army.loc] ? S.terr[p.army.loc].name : '—'}.`, x + 24, y + 222, 20, '#cbbf9f', 'left');
+        const b3 = makeBtn(x + 20, y + 246, w - 40, 62, `⚑  Station the Host at ${t.name}`, () => {
+          p.army.loc = t.id;
+          toast(`Your host makes camp at ${t.name}.`);
+          Sfx.tap(); saveGame();
+        }, { size: 22 });
+        b3.enabled = !this.aiQueue;
+        this.infoBtns.push(b3);
       }
     } else {
       const canReach = targetsFor(0).includes(t.id);
@@ -1555,7 +1605,7 @@ const MapScene = {
     let b = btnAt(this.barBtns || [], x, y);
     if (!b && this.selected >= 0) b = btnAt(this.infoBtns || [], x, y);
     if (b) { Sfx.tap(); b.fn(); return; }
-    if (this.selected >= 0 && y >= 815 && y <= 1045) return; // tap inside info panel
+    if (this.selected >= 0 && y >= 775 && y <= 1120) return; // tap inside info panel
     // the island is drawn through the camera, so invert the tap to map space
     const [mx, my] = this.camInverse(x, y);
     const t = MapGen.terrAt(mx, my);
@@ -1578,12 +1628,19 @@ const BattleScene = {
     this.roundI = 0;
     this.timer = 0;
     this.phase = 'stance';
-    this.view = { as: player().army.s, ak: player().army.k, dg: this.t.garrison };
+    const foeHost = hostAt(ti);
+    this.hadHost = !!foeHost;
+    this.view = {
+      as: player().army.s, ak: player().army.k,
+      dg: this.t.garrison + (foeHost ? armySize(foeHost) : 0),
+    };
     this.lunge = 0;
     const def = this.t.owner < 0 ? 'the free folk' : S.lords[this.t.owner].name;
     Modal.show({
       title: `The Battle of ${this.t.name}`,
-      lines: `Your host meets the garrison of ${def}. How will you order the attack?`,
+      lines: foeHost
+        ? `The host of ${def} stands with the garrison — this will be a hard fight. How will you order the attack?`
+        : `Your host meets the garrison of ${def}. How will you order the attack?`,
       buttons: [
         { label: 'Bold Assault (hit hard, bleed hard)', fn: () => this.begin(2), color: '#6b2a2a' },
         { label: 'Steady Advance', fn: () => this.begin(1) },
@@ -1931,11 +1988,11 @@ const JoustScene = {
     } else {
       if (won) {
         const stake = pick(lordTerrs(this.foe.id).filter(t => t.id !== HOME_TERRS[this.foe.id])) || lordTerrs(this.foe.id)[0];
-        stake.owner = 0; p.fame += 14; MapGen.repaint(); checkElimination(this.foe.id);
+        stake.owner = 0; p.fame += 14; MapGen.repaint(); checkElimination(this.foe.id); validateHosts();
         lines = `By the laws of the tourney, ${stake.name} passes to your banner!`;
       } else {
         const stake = pick(lordTerrs(0).filter(t => t.id !== HOME_TERRS[0])) || lordTerrs(0)[0];
-        stake.owner = this.foe.id; p.fame = Math.max(0, p.fame - 8); MapGen.repaint(); checkElimination(0);
+        stake.owner = this.foe.id; p.fame = Math.max(0, p.fame - 8); MapGen.repaint(); checkElimination(0); validateHosts();
         lines = `A bitter day — ${stake.name} passes to ${this.foe.name}.`;
       }
     }
@@ -2718,7 +2775,7 @@ const EndScene = {
       ctx.shadowBlur = 60;
       drawCrown(W / 2, 380, 100 * (1 + Math.sin(gTime * 2) * 0.03));
       ctx.restore();
-      textShadow('ALL ALBION IS YOURS', W / 2, 600, 52, '#ffd75e');
+      titleText('ALL ALBION IS YOURS', W / 2, 600, 52);
       textShadow('Long live the Sovereign!', W / 2, 680, 36, '#e8c25e');
       text(`Won in ${dateStr()} with ${player().fame} fame.`, W / 2, 760, 26, '#cbbf9f');
     } else {

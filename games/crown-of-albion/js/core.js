@@ -132,7 +132,15 @@ function roundRect(x, y, w, h, r) {
 }
 function panel(x, y, w, h, opts = {}) {
   ctx.save();
-  roundRect(x, y, w, h, opts.r || 18);
+  const r = opts.r || 18;
+  // grounded drop shadow, drawn (shadowBlur is too slow in software rendering)
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  roundRect(x - 3, y + 5, w + 6, h + 8, r + 4);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  roundRect(x + 2, y + 9, w - 4, h, r);
+  ctx.fill();
+  roundRect(x, y, w, h, r);
   const g = ctx.createLinearGradient(0, y, 0, y + h);
   g.addColorStop(0, opts.top || '#3a2c1c');
   g.addColorStop(1, opts.bot || '#241a10');
@@ -140,13 +148,54 @@ function panel(x, y, w, h, opts = {}) {
   ctx.globalAlpha *= (opts.alpha === undefined ? 0.96 : opts.alpha);
   ctx.fill();
   ctx.globalAlpha = 1;
+  // top sheen so the panel reads as lit, not flat
+  const sh = ctx.createLinearGradient(0, y, 0, y + h * 0.3);
+  sh.addColorStop(0, 'rgba(255,240,205,0.12)');
+  sh.addColorStop(1, 'rgba(255,240,205,0)');
+  roundRect(x + 3, y + 3, w - 6, h * 0.3, Math.max(4, r - 5));
+  ctx.fillStyle = sh;
+  ctx.fill();
   ctx.lineWidth = 4;
   ctx.strokeStyle = '#c9a44a';
+  roundRect(x, y, w, h, r);
   ctx.stroke();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = 'rgba(255,235,180,0.25)';
-  roundRect(x + 5, y + 5, w - 10, h - 10, (opts.r || 18) - 6);
+  roundRect(x + 5, y + 5, w - 10, h - 10, r - 6);
   ctx.stroke();
+  // corner rivets
+  for (const [rx, ry] of [[x + 14, y + 14], [x + w - 14, y + 14], [x + 14, y + h - 14], [x + w - 14, y + h - 14]]) {
+    ctx.fillStyle = '#e2c26a';
+    ctx.beginPath(); ctx.arc(rx, ry, 3.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(60,38,10,0.8)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath(); ctx.arc(rx - 1, ry - 1, 1.1, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* engraved gold display type for titles and headers */
+function titleText(s, x, y, size, align = 'center') {
+  ctx.save();
+  ctx.font = `bold ${size}px ${FONT}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.65)';
+  ctx.shadowBlur = size * 0.16;
+  ctx.shadowOffsetY = Math.max(2, size * 0.05);
+  const g = ctx.createLinearGradient(0, y - size * 0.52, 0, y + size * 0.52);
+  g.addColorStop(0, '#fff4d0');
+  g.addColorStop(0.45, '#f2cf7a');
+  g.addColorStop(0.75, '#cd9c3f');
+  g.addColorStop(1, '#8a5f1a');
+  ctx.fillStyle = g;
+  ctx.fillText(s, x, y);
+  ctx.shadowColor = 'transparent';
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.strokeStyle = 'rgba(56,36,10,0.85)';
+  ctx.strokeText(s, x, y);
   ctx.restore();
 }
 
@@ -376,6 +425,100 @@ const Sfx = {
     this.voice(strong ? 96 : 84, 0.2, { type: 'sine', vol: strong ? 0.16 : 0.09, slide: -56, delay, attack: 0.005 });
     this.noise(0.12, strong ? 0.05 : 0.03, delay, true);
   },
+  /* a plucked string via Karplus-Strong: a noise burst circulating through a
+     tuned delay + lowpass feedback loop — a genuinely lute-like tone */
+  pluck(f, dur = 1.1, vol = 0.25, delay = 0, pan = 0) {
+    const ac = this.ac;
+    if (!ac || !this.on || !this.master) return;
+    const t = ac.currentTime + delay;
+    const blen = Math.max(2, Math.round(ac.sampleRate / f));
+    const buf = ac.createBuffer(1, blen, ac.sampleRate);
+    const bd = buf.getChannelData(0);
+    for (let i = 0; i < blen; i++) bd[i] = Math.random() * 2 - 1;
+    const burst = ac.createBufferSource();
+    burst.buffer = buf;
+    const dl = ac.createDelay(0.1);
+    dl.delayTime.value = 1 / f;
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = Math.min(9000, f * 7);
+    const fb = ac.createGain();
+    fb.gain.setValueAtTime(0.985, t);
+    fb.gain.linearRampToValueAtTime(0.55, t + dur);   // let the string die out
+    const out = ac.createGain();
+    out.gain.setValueAtTime(vol, t);
+    out.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    burst.connect(dl);
+    dl.connect(lp); lp.connect(fb); fb.connect(dl);   // the feedback loop
+    dl.connect(out);
+    let tail = out;
+    if (ac.createStereoPanner) {
+      const pn = ac.createStereoPanner();
+      pn.pan.value = pan;
+      out.connect(pn);
+      tail = pn;
+    }
+    tail.connect(this.master);
+    burst.start(t);
+    burst.stop(t + blen / ac.sampleRate + 0.01);
+    setTimeout(() => {
+      try { dl.disconnect(); lp.disconnect(); fb.disconnect(); out.disconnect(); tail.disconnect(); } catch (e) { /* gone */ }
+    }, (delay + dur + 0.4) * 1000);
+  },
+  /* a breathy flute: sine with vibrato and a whisper of filtered air */
+  flute(f, dur, vol = 0.06, delay = 0) {
+    const ac = this.ac;
+    if (!ac || !this.on || !this.master) return;
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, t);
+    const lfo = ac.createOscillator();
+    lfo.frequency.value = 5.2;
+    const lfoG = ac.createGain();
+    lfoG.gain.value = 9;                 // vibrato depth in cents
+    lfo.connect(lfoG);
+    lfoG.connect(o.detune);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.09);
+    g.gain.setValueAtTime(vol, t + Math.max(0.1, dur - 0.12));
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t); o.stop(t + dur + 0.05);
+    lfo.start(t); lfo.stop(t + dur + 0.05);
+    this.noise(Math.min(0.2, dur * 0.3), vol * 0.12, delay, true);
+  },
+  /* warm strings: detuned saws through a gentle lowpass, spread in stereo */
+  pad(f, dur, delay = 0, pan = 0) {
+    const ac = this.ac;
+    if (!ac || !this.on || !this.master) return;
+    const t = ac.currentTime + delay;
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 850;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.02, t + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    lp.connect(g);
+    let tail = g;
+    if (ac.createStereoPanner) {
+      const pn = ac.createStereoPanner();
+      pn.pan.value = pan;
+      g.connect(pn);
+      tail = pn;
+    }
+    tail.connect(this.master);
+    for (const det of [-6, 5]) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, t);
+      o.detune.setValueAtTime(det, t);
+      o.connect(lp);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  },
   tap() { this.voice(660, 0.06, { type: 'triangle', vol: 0.07 }); },
   coin() { this.voice(880, 0.07, { type: 'square', vol: 0.06 }); this.voice(1320, 0.12, { type: 'square', vol: 0.06, delay: 0.07 }); },
   clash() { this.noise(0.16, 0.22); this.voice(220, 0.12, { type: 'sawtooth', vol: 0.09, slide: -120 }); },
@@ -406,22 +549,25 @@ const Sfx = {
     while (this.nextBar < this.ac.currentTime + 0.7) {
       const delay = Math.max(0, this.nextBar - this.ac.currentTime);
       const b = this.prog[this.barI % this.prog.length];
-      // bass: root then the fifth, low and round
-      this.voice(this.freq(b.root - 12), beat * 1.9, { type: 'sine', vol: 0.08, attack: 0.02, delay });
-      this.voice(this.freq(b.root - 12), beat * 1.9, { type: 'triangle', vol: 0.025, delay });
-      this.voice(this.freq(b.root - 5), beat * 1.9, { type: 'sine', vol: 0.07, attack: 0.02, delay: delay + beat * 2 });
-      // sustained chord pad
-      for (const m of b.chord) {
-        this.voice(this.freq(m), bar * 0.97, { type: 'triangle', vol: 0.02, attack: 0.18, delay });
-        this.voice(this.freq(m + 12), bar * 0.97, { type: 'sine', vol: 0.012, attack: 0.22, delay });
+      // plucked bass with a round sub underneath
+      this.pluck(this.freq(b.root - 12), 1.6, 0.34, delay, -0.15);
+      this.voice(this.freq(b.root - 24), beat * 1.9, { type: 'sine', vol: 0.06, attack: 0.03, delay });
+      this.pluck(this.freq(b.root - 5), 1.4, 0.22, delay + beat * 2, -0.15);
+      // string pad carrying the chord, spread across the stage
+      b.chord.forEach((m, i) => {
+        this.pad(this.freq(m), bar * 1.02, delay, [-0.45, 0.1, 0.45][i % 3]);
+      });
+      // lute arpeggio dancing over the chord
+      const arp = [0, 1, 2, 1];
+      for (let i = 0; i < 4; i++) {
+        this.pluck(this.freq(b.chord[arp[i]] + 12), 0.8, i === 0 ? 0.16 : 0.11, delay + i * beat, 0.35);
       }
-      // stately lead, doubled an octave down very softly (recorder + lute)
+      // the flute sings the melody, a lute doubling each phrase's attack
       let mt = delay;
       for (const [m, beats] of b.mel) {
-        const d2 = beats * beat * 0.92;
-        this.voice(this.freq(m), d2, { type: 'triangle', vol: 0.05, attack: 0.02, delay: mt });
-        this.voice(this.freq(m), d2, { type: 'square', vol: 0.016, attack: 0.02, delay: mt, detune: 5 });
-        this.voice(this.freq(m - 12), d2, { type: 'sine', vol: 0.02, delay: mt });
+        const d2 = beats * beat * 0.95;
+        this.flute(this.freq(m), d2, 0.055, mt);
+        this.pluck(this.freq(m), Math.min(1.1, d2), 0.1, mt, 0.2);
         mt += beats * beat;
       }
       // war-drum on the strong beats
@@ -540,7 +686,7 @@ const Modal = {
     panel(x, y, o.w, h);
     let cy = y + 56;
     if (o.icon) { o.icon(W / 2, cy + 10); cy += 60; }
-    textShadow(o.title, W / 2, cy, 34, '#ffd75e');
+    titleText(o.title, W / 2, cy, 34);
     cy += 50;
     for (const ln of wrapped) { text(ln, W / 2, cy, 26, '#ead9b8'); cy += 34; }
     cy += 10;
@@ -569,6 +715,9 @@ const Modal = {
 let scene = null, gTime = 0, shake = 0;
 let timeScale = 1, slowMoT = 0;
 let figSheen = 0.16;   // how strongly baked figures catch the scene light
+/* adaptive quality: after a few seconds, drop the costliest cosmetic layer
+   (film grain) if this renderer can't hold a healthy frame rate */
+let grainOn = true, _fxT = 0, _fxN = 0, _fxLocked = false;
 function slowMo(scale, dur) { timeScale = scale; slowMoT = dur; }
 function setScene(s, ...args) {
   if (scene && scene.exit) scene.exit();
@@ -580,6 +729,13 @@ function frame(ts) {
   const rawDt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
   lastTs = ts;
   if (slowMoT > 0) { slowMoT -= rawDt; if (slowMoT <= 0) timeScale = 1; }
+  if (!_fxLocked && gTime > 2 && rawDt > 0) {
+    _fxT += rawDt; _fxN++;
+    if (_fxN >= 120) {
+      _fxLocked = true;
+      if (_fxN / _fxT < 44) grainOn = false;
+    }
+  }
   const dt = rawDt * timeScale;
   gTime += dt;
   Sfx.update();
@@ -596,6 +752,7 @@ function frame(ts) {
   updParts(dt);
   drawParts();
   ctx.restore();
+  drawGrade();
   Modal.render(dt);
   drawToasts(dt);
   requestAnimationFrame(frame);
@@ -635,6 +792,50 @@ function letterbox(k) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, 92 * k);
   ctx.fillRect(0, H - 92 * k, W, 92 * k);
+}
+
+/* full-frame colour grade + animated film grain.
+   alpha is baked into the layers so each is ONE plain source-over blit —
+   'overlay' compositing at full screen is far too slow in software rendering */
+let _gradeCv = null, _grainCv = null;
+const GRAIN_W = 840, GRAIN_H = 1400;
+function drawGrade() {
+  if (!_gradeCv) {
+    _gradeCv = document.createElement('canvas');
+    _gradeCv.width = 180; _gradeCv.height = 320;
+    const gc = _gradeCv.getContext('2d');
+    // warm key light upper-left fading to nothing mid-frame...
+    let g = gc.createRadialGradient(30, 60, 10, 30, 60, 300);
+    g.addColorStop(0, 'rgba(255,196,120,0.14)');
+    g.addColorStop(1, 'rgba(255,196,120,0)');
+    gc.fillStyle = g;
+    gc.fillRect(0, 0, 180, 320);
+    // ...and a cool shade pooling lower-right
+    g = gc.createRadialGradient(160, 280, 10, 160, 280, 320);
+    g.addColorStop(0, 'rgba(52,66,120,0.15)');
+    g.addColorStop(1, 'rgba(52,66,120,0)');
+    gc.fillStyle = g;
+    gc.fillRect(0, 0, 180, 320);
+  }
+  if (!_grainCv) {
+    _grainCv = document.createElement('canvas');
+    _grainCv.width = GRAIN_W; _grainCv.height = GRAIN_H;
+    const gx = _grainCv.getContext('2d');
+    const img = gx.createImageData(GRAIN_W, GRAIN_H);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.random();
+      const light = v > 0.5;
+      const c = light ? 255 : 0;
+      img.data[i] = c; img.data[i + 1] = c; img.data[i + 2] = c;
+      img.data[i + 3] = Math.abs(v - 0.5) * 26;   // subtle, pre-baked alpha
+    }
+    gx.putImageData(img, 0, 0);
+  }
+  ctx.drawImage(_gradeCv, 0, 0, W, H);
+  if (grainOn) {
+    const jx = -(gTime * 61 % (GRAIN_W - W)), jy = -(gTime * 47 % (GRAIN_H - H));
+    ctx.drawImage(_grainCv, jx, jy);
+  }
 }
 function sunRays(x, y, r, color, alpha, n = 10, speed = 0.05) {
   ctx.save();

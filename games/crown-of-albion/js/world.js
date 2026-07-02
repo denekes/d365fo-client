@@ -398,12 +398,12 @@ function newGame(heroIdx, diff) {
   const lords = [
     { id: 0, name: hero.name, color: PLAYER_COLOR, isPlayer: true, alive: true,
       gold: 80, fame: 10, joust: hero.joust, blade: hero.blade, lead: hero.lead,
-      army: { s: 10, k: 2, c: 0 } },
+      army: { s: 10, k: 2, c: 0, loc: HOME_TERRS[0] } },
   ];
   AI_LORDS.forEach((a, i) => lords.push({
     id: i + 1, name: a.name, color: a.color, isPlayer: false, alive: true,
     gold: 80, fame: 10, joust: a.joust, blade: a.blade, lead: a.lead,
-    army: { s: 10, k: 2, c: 0 },
+    army: { s: 10, k: 2, c: 0, loc: HOME_TERRS[i + 1] },
   }));
   const terr = TERR_DEFS.map((t, i) => ({
     id: i, name: t.name, owner: -1,
@@ -427,8 +427,27 @@ function lordTerrs(li) { return S.terr.filter(t => t.owner === li); }
 function dateStr() { return `${MONTHS[S.month % 12]}, ${S.year} AD`; }
 function armyStr(a, lead = 0) { return a.s + a.k * 4 + lead * 1.5; }
 function armySize(a) { return a.s + a.k; }
+/* the lord's host stationed at territory ti, if its owner keeps it there */
+function hostAt(ti) {
+  const t = S.terr[ti];
+  if (!t || t.owner < 0) return null;
+  const l = S.lords[t.owner];
+  return (l.alive && l.army.loc === ti && armySize(l.army) > 0) ? l.army : null;
+}
 function defStr(t, breach = 0) {
-  return t.garrison * (1 + 0.3 * t.castle * (1 - breach));
+  const host = hostAt(t.id);
+  const hostStr = host ? host.s + host.k * 4 : 0;
+  return (t.garrison + hostStr) * (1 + 0.3 * t.castle * (1 - breach));
+}
+/* keep every host stationed on land its lord still owns */
+function validateHosts() {
+  for (const l of S.lords) {
+    if (!l.alive) continue;
+    if (l.army.loc === undefined || l.army.loc < 0 || S.terr[l.army.loc].owner !== l.id) {
+      const owned = lordTerrs(l.id);
+      l.army.loc = owned.length ? owned[0].id : -1;
+    }
+  }
 }
 function effLead(l) { return l.lead + l.fame / 25; }
 
@@ -479,36 +498,52 @@ function simBattle(att, attArmy, defT, breach, stance = 1) {
   const dealt = [0.85, 1, 1.25][stance];
   const taken = [0.75, 1, 1.15][stance];
   const a = { s: attArmy.s, k: attArmy.k };
-  let dGar = defT.garrison;
+  // defenders: the garrison, joined by the owner's host if it is stationed here
+  const host = hostAt(defT.id);
+  const dfd = { g: defT.garrison, hs: host ? host.s : 0, hk: host ? host.k : 0 };
+  const defUnits = () => dfd.g + dfd.hs + dfd.hk;
   const dMul = 1 + 0.3 * defT.castle * (1 - breach);
   const leadBonus = 1 + effLead(att) * 0.045;
   const rounds = [];
   let guard = 0;
-  while (armySize(a) > 0 && dGar > 0 && guard++ < 40) {
+  while (armySize(a) > 0 && defUnits() > 0 && guard++ < 60) {
     const A = (a.s + a.k * 4) * leadBonus;
-    const D = dGar * dMul;
+    const D = (dfd.g + dfd.hs + dfd.hk * 4) * dMul;
     let dLoss = Math.max(1, Math.round(A * rnd(0.07, 0.13) * dealt / dMul));
     let aLoss = Math.max(1, Math.round(D * rnd(0.07, 0.13) * taken));
-    dLoss = Math.min(dLoss, dGar);
+    dLoss = Math.min(dLoss, defUnits());
     aLoss = Math.min(aLoss, armySize(a));
-    dGar -= dLoss;
-    // soldiers die first
+    // defenders: garrison falls first, then host soldiers, then host knights
+    let rem = dLoss;
+    const gl = Math.min(dfd.g, rem); dfd.g -= gl; rem -= gl;
+    const hl = Math.min(dfd.hs, rem); dfd.hs -= hl; rem -= hl;
+    dfd.hk -= Math.min(dfd.hk, rem);
+    // attackers: soldiers die first
     const sl = Math.min(a.s, aLoss);
     a.s -= sl;
     a.k -= Math.min(a.k, aLoss - sl);
-    rounds.push({ aLoss, dLoss, as: a.s, ak: a.k, dg: dGar });
+    rounds.push({ aLoss, dLoss, as: a.s, ak: a.k, dg: defUnits() });
   }
-  return { rounds, win: dGar <= 0 && armySize(a) > 0, as: a.s, ak: a.k, dg: Math.max(0, dGar) };
+  return {
+    rounds, win: defUnits() <= 0 && armySize(a) > 0,
+    as: a.s, ak: a.k,
+    dg: Math.max(0, dfd.g), dhs: dfd.hs, dhk: dfd.hk, hadHost: !!host,
+  };
 }
 
 /* apply a finished battle to the world */
 function applyBattle(attLord, defT, res) {
   attLord.army.s = res.as;
   attLord.army.k = res.ak;
+  const defOwner = defT.owner >= 0 ? S.lords[defT.owner] : null;
+  const hostDefended = res.hadHost && defOwner;
   if (res.win) {
+    if (hostDefended) { defOwner.army.s = res.dhs; defOwner.army.k = res.dhk; }
     captureTerr(defT.id, attLord.id, attLord);
+    attLord.army.loc = defT.id;   // the victorious host occupies the field
   } else {
     defT.garrison = Math.max(1, res.dg);
+    if (hostDefended) { defOwner.army.s = res.dhs; defOwner.army.k = res.dhk; }
   }
 }
 
@@ -522,6 +557,7 @@ function captureTerr(ti, li, lord) {
   lord.fame += 4;
   MapGen.repaint();
   if (prevOwner >= 0) checkElimination(prevOwner);
+  validateHosts();   // any host stranded on lost land retreats to friendly soil
 }
 
 function checkElimination(li) {
@@ -563,13 +599,24 @@ function aiTakeTurn(l) {
   if (myStr > defStr(target, breach) * diff.aiAggro && armySize(l.army) > 6) {
     const res = simBattle(l, l.army, target, breach);
     const vsPlayer = target.owner === 0;
+    const hostFought = res.hadHost && vsPlayer;
     applyBattle(l, target, res);
     if (res.win) {
       toast(`${l.name} has seized ${target.name}!`, vsPlayer ? '#ffb0a0' : '#e8d8b0');
+      if (hostFought) toast('Your host was driven from the field!', '#ffb0a0');
       if (vsPlayer) { buzz(120); Sfx.crack(); }
     } else if (vsPlayer) {
-      toast(`Your garrison at ${target.name} repelled ${l.name}!`, '#b8e8a8');
+      toast(hostFought
+        ? `Your host and garrison threw back ${l.name} at ${target.name}!`
+        : `Your garrison at ${target.name} repelled ${l.name}!`, '#b8e8a8');
       Sfx.fanfare();
+    }
+  } else {
+    // no attack this month: park the host on the weakest frontier province
+    const frontier = lordTerrs(l.id).filter(t => [...MapGen.adj[t.id]].some(a => S.terr[a].owner !== l.id && !S.terr[a].sherwood));
+    if (frontier.length) {
+      frontier.sort((a, b) => a.garrison - b.garrison);
+      l.army.loc = frontier[0].id;
     }
   }
 }
@@ -640,6 +687,9 @@ function loadGame() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     S = JSON.parse(raw);
+    // older saves predate stationed hosts — give each host a home
+    for (const l of S.lords) if (l.army.loc === undefined) l.army.loc = -1;
+    validateHosts();
     MapGen.repaint();
     return true;
   } catch (e) { return false; }

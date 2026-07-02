@@ -37,6 +37,7 @@ domain, and every name on the map is a historical region of the island.)
 |---|---|
 | **Recruit** | Hire soldiers (8g), knights (25g, worth four soldiers), catapults (50g, needed to breach castle walls). |
 | **March** | Tap a **land-bordering** enemy or neutral province and attack it. Choose bold, steady, or cautious tactics. |
+| **Station the Host** | Your army camps in a province of your choice (shown by a shield badge). It **defends that province** when attacked, occupies land it conquers, and can shift soldiers to and from the local garrison for free. |
 | **Tournament** | Challenge a rival lord to the joust — wager gold, or (with enough fame) an entire province. |
 | **Night Raid** | Sneak into a rival's keep and duel the guard captain for a share of his treasury. Get caught and you'll be ransomed. |
 | **Seek Robin Hood** | Hold a province bordering Sherwood Forest, then visit the greenwood to win his archers at the contest of the bow. |
@@ -109,10 +110,15 @@ events — harvests, bandits, wandering knights, camp fever — keep the realm l
   Hood as a hooded Lincoln-green outlaw with cloak, quiver and longbow — rendered
   with gradients, rim light and ambient shadow, and baked to cached sprites so the
   detail stays smooth on a phone
-- A majestic, fully procedural medieval score: an 8-bar A-minor progression voiced
-  with a round bass, sustained chord pads, a stately recorder-and-lute lead, and a
-  war-drum, all through a generated hall reverb; fanfares and dirges share the same
-  space
+- A majestic, fully procedural medieval score: physically-modeled plucked strings
+  (Karplus-Strong synthesis — real lute-like tones for bass and arpeggios), a
+  breathy vibrato flute lead, warm detuned string pads spread in stereo, and a
+  war-drum, all through a generated hall reverb; fanfares and dirges share the
+  same space
+- A full-frame cinematic colour grade (warm key light, cool shade) with animated
+  film grain, engraved gold display typography, and grounded UI panels with drop
+  shadows and rivets; an adaptive-quality system drops the grain automatically on
+  weak renderers
 - Three playable champions with different strengths, and three difficulty levels
 - Three rival AI lords who recruit, expand, besiege, and can be eliminated
 - Fame system: renown from tourneys and conquest boosts your leadership in battle
