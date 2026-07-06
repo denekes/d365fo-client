@@ -42,6 +42,22 @@ domain, and every name on the map is a historical region of the island.)
 | **Night Raid** | Sneak into a rival's keep and duel the guard captain for a share of his treasury. Get caught and you'll be ransomed. |
 | **Seek Robin Hood** | Hold a province bordering Sherwood Forest, then visit the greenwood to win his archers at the contest of the bow. |
 | **Fortify** | Reinforce a garrison or build a castle in any province you own. |
+| **Marriage** | When your fame is high (20+), rival houses may offer their kin's hand — weakened houses are the keenest. Accept and their **castled provinces pass to you as dowry** (the house keeps its home seat; a gold bride-price if they hold no castles), peace is sworn for 8 months, and a painted wedding interlude plays. One marriage per saga. |
+
+### Music: use real orchestral recordings (recommended)
+
+The built-in score is fully synthesized (plucked strings, flute, string pads,
+horns, timpani through a bus compressor) — but nothing beats real recordings.
+Drop looping tracks into `music/` (e.g. royalty-free/CC0 orchestral pieces) and
+point the paths at the top of `js/core.js` at them:
+
+```js
+MUSIC: { court: 'music/theme-court.ogg', war: 'music/theme-war.ogg' },
+```
+
+The game then streams your files (court theme on the map/tourney, war theme in
+battles and sieges, with cross-fades) and the synthesizer stays silent. Check
+each track's license — CC0 needs nothing; CC-BY needs a credit line here.
 
 Marching, tournaments, raids, and seeking Robin Hood share one action per month;
 recruiting and fortifying are always available.

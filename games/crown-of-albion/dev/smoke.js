@@ -190,9 +190,36 @@ vm.runInContext(`
   S = null;
   __r.load = loadGame() && S.lords[0].gold === gold;
 
+  // marriage: wedding a house yields its castled provinces (never the home
+  // seat), sets the married state, and swears a truce
+  newGame(0, 1);
+  const dowryT = S.terr.find(t => t.owner === -1 && !t.sherwood);
+  dowryT.owner = 1; dowryT.castle = 1;
+  const wed = acceptMarriage(1);
+  __r.marriageDowry = wed.dowry.some(t => t.id === dowryT.id) && dowryT.owner === 0;
+  __r.marriageKeepsHome = S.terr[HOME_TERRS[1]].owner === 1;
+  __r.marriageState = S.marriage.to === 1 && S.marriage.kin === AI_LORDS[0].kin && truceWith(1);
+  // the truce holds: an overwhelming allied host must not strike your lands
+  S.lords[1].army = { s: 80, k: 10, c: 2, loc: HOME_TERRS[1] };
+  S.lords[1].gold = 500;
+  for (const t of S.terr) if (t.owner === -1 && !t.sherwood) { t.owner = 0; t.garrison = 1; }
+  MapGen.repaint();
+  const beforeProvs = lordTerrs(0).length;
+  for (let i = 0; i < 6; i++) aiTakeTurn(S.lords[1]);
+  __r.trucePeace = lordTerrs(0).length === beforeProvs;
+  // no second marriage, and no offers below the fame threshold
+  __r.oneMarriage = rollMarriageOffer() === null;
+  newGame(0, 1);   // a clean world for the scene walk
+
   // scene plumbing: every scene renders & updates without throwing
   __r.scenes = true;
   try {
+    acceptMarriage(1);
+    setScene(WeddingScene, 1, { dowry: [], gold: 40, kin: AI_LORDS[0].kin });
+    for (let i = 0; i < 30; i++) { scene.update(0.016); scene.render(0.016); }
+    scene.onTap(360, 640);
+    if (scene !== MapScene) throw new Error('wedding did not return to the map');
+    newGame(0, 1);
     setScene(SelectScene); scene.render(0.016);
     setScene(MapScene); scene.update(0.016); scene.render(0.016);
     scene.onTap(360, 620); scene.render(0.016);          // select a territory
@@ -290,6 +317,11 @@ check('ai: rivals expand', r.aiExpanded);
 check('sherwood: stays free after 40 AI months', r.sherwoodStaysFree);
 check('rules: losing all land eliminates a lord', r.elim);
 check('save: load round-trips', r.load);
+check('marriage: dowry passes the castled provinces', r.marriageDowry);
+check('marriage: the house keeps its home seat', r.marriageKeepsHome);
+check('marriage: married state and truce are sworn', r.marriageState);
+check('marriage: the wedding truce holds against attack', r.trucePeace);
+check('marriage: only one match is ever offered', r.oneMarriage);
 check('raid: a short 30px flick registers as a swipe', r.raidShortSwipe);
 check('raid: a long slow swipe registers', r.raidLongSwipe);
 check('raid: a still tap registers as a tap', r.raidTap);

@@ -59,9 +59,9 @@ const HEROES = [
 ];
 
 const AI_LORDS = [
-  { name: 'Lord Bran the Black',  color: '#34548f', joust: 7, blade: 6, lead: 6 },
-  { name: 'Duke Osric of Anglia', color: '#3e7c3a', joust: 6, blade: 7, lead: 5 },
-  { name: 'Baron Hadwin the Grim', color: '#6b4a9e', joust: 5, blade: 5, lead: 8 },
+  { name: 'Lord Bran the Black',  color: '#34548f', joust: 7, blade: 6, lead: 6, kin: 'Lady Sigrid' },
+  { name: 'Duke Osric of Anglia', color: '#3e7c3a', joust: 6, blade: 7, lead: 5, kin: 'Lady Elswyth' },
+  { name: 'Baron Hadwin the Grim', color: '#6b4a9e', joust: 5, blade: 5, lead: 8, kin: 'Lady Rohese' },
 ];
 
 const PLAYER_COLOR = '#b3372c';
@@ -417,7 +417,8 @@ function newGame(heroIdx, diff) {
     terr[ti].castle = 1;
     terr[ti].income += 4;
   });
-  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, sherwoodReadyAt: 0, log: [] };
+  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, sherwoodReadyAt: 0,
+    marriage: { to: -1, kin: '' }, truce: {}, log: [] };
   MapGen.repaint();
   saveGame();
 }
@@ -490,6 +491,41 @@ function grantRobinAid(score) {
   saveGame();
   return { men, knights, gold, rival };
 }
+
+/* ---------------- marriage alliances ---------------- */
+/* houses offer their kin's hand when your renown is high — the weaker the
+   house, the keener the match. returns the offering lord, or null */
+function rollMarriageOffer() {
+  if (!S.marriage || S.marriage.to >= 0) return null;
+  if (player().fame < 20) return null;
+  const cands = S.lords.filter(l => !l.isPlayer && l.alive && lordTerrs(l.id).length > 0);
+  if (!cands.length) return null;
+  const l = pick(cands);
+  let chance = 0.08;
+  if (lordTerrs(l.id).length <= 2) chance += 0.18;        // a desperate house seeks protection
+  if (player().fame >= 40) chance += 0.08;                // renown draws suitors
+  return Math.random() < chance ? l : null;
+}
+/* wed into a house: their castled provinces (all but the home seat) pass to
+   you as dowry, a bride-price of gold if there are none, and peace follows */
+function acceptMarriage(li) {
+  const l = S.lords[li];
+  const kin = AI_LORDS[li - 1].kin;
+  const holdings = lordTerrs(li);
+  let dowry = holdings.filter(t => t.castle > 0 && t.id !== HOME_TERRS[li]);
+  if (!dowry.length) dowry = holdings.filter(t => t.id !== HOME_TERRS[li]).slice(0, 1);
+  for (const t of dowry) t.owner = 0;
+  let gold = 0;
+  if (!dowry.length) { gold = Math.min(l.gold, 60); l.gold -= gold; player().gold += gold; }
+  player().fame += 12;
+  S.marriage = { to: li, kin };
+  S.truce[li] = monthAbs() + 8;
+  MapGen.repaint();
+  validateHosts();
+  saveGame();
+  return { dowry, gold, kin };
+}
+function truceWith(li) { return S.truce && S.truce[li] > monthAbs(); }
 
 /* ---------------- battle resolution (shared with AI) ---------------- */
 /* returns rounds for animation + outcome; mutates nothing */
@@ -579,7 +615,9 @@ function aiTakeTurn(l) {
   const diff = DIFFS[S.diff];
   // shopping
   let budget = l.gold * 0.8;
-  const myTargets = targetsFor(l.id).map(i => S.terr[i]);
+  // a wedding truce bars this house from striking the player's lands
+  const myTargets = targetsFor(l.id).map(i => S.terr[i])
+    .filter(t => !(t.owner === 0 && truceWith(l.id)));
   const wantCat = myTargets.some(t => t.castle > 0) && l.army.c < 2;
   if (wantCat && budget >= COSTS.catapult && Math.random() < 0.5) {
     l.gold -= COSTS.catapult; budget -= COSTS.catapult; l.army.c++;
@@ -689,6 +727,8 @@ function loadGame() {
     S = JSON.parse(raw);
     // older saves predate stationed hosts — give each host a home
     for (const l of S.lords) if (l.army.loc === undefined) l.army.loc = -1;
+    if (!S.marriage) S.marriage = { to: -1, kin: '' };
+    if (!S.truce) S.truce = {};
     validateHosts();
     MapGen.repaint();
     return true;

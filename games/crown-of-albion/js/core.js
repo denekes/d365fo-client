@@ -352,9 +352,9 @@ function buzz(ms) {
 const Sfx = {
   ac: null, master: null, wet: null, on: true, musicOn: true,
   nextBar: 0, barI: 0,
-  /* an 8-bar majestic progression in A minor: Am G F Am | Dm C E Am
-     each bar: bass root, a sustained triad pad, and a stately lead line */
-  prog: [
+  /* the court theme: an A section in A minor and a lifted B section that
+     turns toward the relative major, where the horns enter */
+  progA: [
     { root: 45, chord: [57, 60, 64], mel: [[76, 2], [72, 2]] },
     { root: 43, chord: [55, 59, 62], mel: [[74, 2], [71, 2]] },
     { root: 41, chord: [53, 57, 60], mel: [[72, 2], [69, 2]] },
@@ -364,28 +364,91 @@ const Sfx = {
     { root: 40, chord: [52, 56, 59], mel: [[71, 2], [68, 2]] },
     { root: 45, chord: [57, 60, 64], mel: [[69, 3], [71, 1]] },
   ],
+  progB: [
+    { root: 48, chord: [60, 64, 67], mel: [[79, 2], [76, 1], [77, 1]], horns: true },
+    { root: 43, chord: [55, 59, 62], mel: [[79, 1.5], [78, 0.5], [74, 2]], horns: true },
+    { root: 45, chord: [57, 60, 64], mel: [[76, 2], [72, 2]], horns: true },
+    { root: 41, chord: [53, 57, 60], mel: [[72, 1], [74, 1], [76, 2]], horns: true },
+    { root: 48, chord: [60, 64, 67], mel: [[79, 2], [81, 2]], horns: true },
+    { root: 43, chord: [55, 59, 62], mel: [[79, 2], [74, 2]], horns: true },
+    { root: 40, chord: [52, 56, 59], mel: [[76, 1.5], [74, 0.5], [71, 2]], horns: true },
+    { root: 45, chord: [57, 60, 64], mel: [[69, 4]], horns: true },
+  ],
+  /* the war theme: a grim, driving four bars under battles and sieges */
+  progWar: [
+    { root: 45, chord: [57, 60, 64], mel: [[69, 1], [69, 0.5], [72, 0.5], [69, 2]], horns: true, drums: 2 },
+    { root: 45, chord: [57, 60, 64], mel: [[74, 1.5], [72, 0.5], [69, 2]], drums: 2 },
+    { root: 41, chord: [53, 57, 60], mel: [[72, 1], [72, 0.5], [74, 0.5], [77, 2]], horns: true, drums: 2 },
+    { root: 40, chord: [52, 56, 59], mel: [[76, 2], [68, 2]], horns: true, drums: 2 },
+  ],
   ensure() {
     if (!this.ac) {
       try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
       const ac = this.ac;
+      // mastering chain: everything through a gentle bus compressor —
+      // it glues the ensemble and makes the mix read as produced
+      this.bus = ac.createGain();
+      this.bus.gain.value = 0.95;
+      let out = this.bus;
+      try {
+        const comp = ac.createDynamicsCompressor();
+        comp.threshold.value = -20;
+        comp.knee.value = 22;
+        comp.ratio.value = 4;
+        comp.attack.value = 0.008;
+        comp.release.value = 0.22;
+        this.bus.connect(comp);
+        out = comp;
+      } catch (e) { /* raw bus */ }
+      out.connect(ac.destination);
       this.master = ac.createGain();
       this.master.gain.value = 0.9;
-      this.master.connect(ac.destination);
+      this.master.connect(this.bus);
       // a generated hall reverb for cinematic space
       try {
-        const len = Math.floor(ac.sampleRate * 2.2);
+        const len = Math.floor(ac.sampleRate * 2.4);
         const imp = ac.createBuffer(2, len, ac.sampleRate);
         for (let ch = 0; ch < 2; ch++) {
           const d = imp.getChannelData(ch);
-          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
         }
         this.conv = ac.createConvolver(); this.conv.buffer = imp;
-        this.wet = ac.createGain(); this.wet.gain.value = 0.22;
-        this.master.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(ac.destination);
+        this.wet = ac.createGain(); this.wet.gain.value = 0.26;
+        this.master.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(this.bus);
       } catch (e) { /* no reverb */ }
       this.nextBar = ac.currentTime + 0.35;
+      this.initStreams();
     }
     if (this.ac.state === 'suspended') this.ac.resume();
+  },
+  /* real recorded music: drop looping orchestral tracks into music/ and
+     point these paths at them — they take over from the procedural score.
+     e.g. MUSIC: { court: 'music/theme-court.ogg', war: 'music/theme-war.ogg' } */
+  MUSIC: { court: '', war: '' },
+  initStreams() {
+    if (this.streams || typeof Audio === 'undefined') return;
+    this.streams = {};
+    for (const name of ['court', 'war']) {
+      const src = this.MUSIC[name];
+      if (!src) continue;
+      const entry = { el: null, ready: false };
+      this.streams[name] = entry;
+      try {
+        const a = new Audio(src);
+        a.loop = true;
+        a.volume = 0;
+        a.addEventListener('canplaythrough', () => { entry.el = a; entry.ready = true; }, { once: true });
+        a.addEventListener('error', () => { /* missing — the synth score plays */ });
+        a.load();
+      } catch (e) { /* no file */ }
+    }
+  },
+  theme: 'court',
+  setTheme(name) {
+    if (this.theme === name) return;
+    this.theme = name;
+    this.barI = 0;
+    if (this.ac) this.nextBar = this.ac.currentTime + 0.25;
   },
   freq(m) { return 440 * Math.pow(2, (m - 69) / 12); },
   /* one shaped voice with ADSR, routed through master (so it gets reverb) */
@@ -489,6 +552,51 @@ const Sfx = {
     lfo.start(t); lfo.stop(t + dur + 0.05);
     this.noise(Math.min(0.2, dur * 0.3), vol * 0.12, delay, true);
   },
+  /* a noble horn: saw + soft square through a swelling lowpass */
+  horn(f, dur, vol = 0.05, delay = 0, pan = 0) {
+    const ac = this.ac;
+    if (!ac || !this.on || !this.master) return;
+    const t = ac.currentTime + delay;
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(560, t);
+    lp.frequency.linearRampToValueAtTime(1350, t + Math.min(0.5, dur * 0.5));
+    lp.frequency.linearRampToValueAtTime(760, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.14);
+    g.gain.setValueAtTime(vol, t + Math.max(0.15, dur - 0.2));
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    lp.connect(g);
+    let tail = g;
+    if (ac.createStereoPanner) {
+      const pn = ac.createStereoPanner();
+      pn.pan.value = pan;
+      g.connect(pn);
+      tail = pn;
+    }
+    tail.connect(this.master);
+    for (const [type, det] of [['sawtooth', -4], ['square', 3]]) {
+      const o = ac.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      o.detune.setValueAtTime(det, t);
+      o.connect(lp);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  },
+  /* bells, harp run and horns for the wedding */
+  weddingSting() {
+    const run = [69, 72, 76, 79, 81, 84];
+    run.forEach((m, i) => this.pluck(this.freq(m), 1.4, 0.22, i * 0.09, 0.3));
+    const triad = [[64, 0], [67, 0.5], [72, 1.0], [76, 1.5]];
+    for (const [m, d] of triad) {
+      this.horn(this.freq(m), 1.6, 0.055, d, -0.2);
+      this.voice(this.freq(m + 12), 2.2, { type: 'sine', vol: 0.045, delay: d + 0.1, attack: 0.01 });
+    }
+    this.kick(0, true); this.kick(1.0, true);
+    for (let i = 0; i < 3; i++) this.pluck(this.freq(88), 2.4, 0.12, 1.6 + i * 0.5, 0);
+  },
   /* warm strings: detuned saws through a gentle lowpass, spread in stereo */
   pad(f, dur, delay = 0, pan = 0) {
     const ac = this.ac;
@@ -544,35 +652,78 @@ const Sfx = {
     this.kick(0, false); this.kick(0.9, false);
   },
   update() {
-    if (!this.ac || !this.on || !this.musicOn || !this.master) return;
-    const beat = 0.5, bar = beat * 4;
+    if (!this.ac || !this.on || !this.master) return;
+    // real recorded tracks take over whenever the player has provided them
+    if (this.streams) {
+      let usingStream = false;
+      for (const name of ['court', 'war']) {
+        const st = this.streams[name];
+        if (!st || !st.ready || !st.el) continue;
+        usingStream = true;
+        const active = this.musicOn && this.theme === name;
+        const target = active ? 0.55 : 0;
+        st.el.volume += (target - st.el.volume) * 0.06;
+        if (active && st.el.paused) st.el.play().catch(() => {});
+        if (!active && st.el.volume < 0.01 && !st.el.paused) st.el.pause();
+      }
+      if (usingStream) return;
+    }
+    if (!this.musicOn || this.theme === 'none') return;
+    const war = this.theme === 'war';
+    const beat = war ? 0.44 : 0.5, bar = beat * 4;
     while (this.nextBar < this.ac.currentTime + 0.7) {
       const delay = Math.max(0, this.nextBar - this.ac.currentTime);
-      const b = this.prog[this.barI % this.prog.length];
+      // court: A A B A across 8-bar sections; war: its own grim loop
+      let b;
+      if (war) {
+        b = this.progWar[this.barI % this.progWar.length];
+      } else {
+        const section = Math.floor(this.barI / 8) % 4;
+        const prog = section === 2 ? this.progB : this.progA;
+        b = prog[this.barI % 8];
+      }
       // plucked bass with a round sub underneath
       this.pluck(this.freq(b.root - 12), 1.6, 0.34, delay, -0.15);
       this.voice(this.freq(b.root - 24), beat * 1.9, { type: 'sine', vol: 0.06, attack: 0.03, delay });
-      this.pluck(this.freq(b.root - 5), 1.4, 0.22, delay + beat * 2, -0.15);
+      this.pluck(this.freq(b.root - (war ? 12 : 5)), 1.4, 0.22, delay + beat * 2, -0.15);
       // string pad carrying the chord, spread across the stage
       b.chord.forEach((m, i) => {
         this.pad(this.freq(m), bar * 1.02, delay, [-0.45, 0.1, 0.45][i % 3]);
       });
-      // lute arpeggio dancing over the chord
-      const arp = [0, 1, 2, 1];
-      for (let i = 0; i < 4; i++) {
-        this.pluck(this.freq(b.chord[arp[i]] + 12), 0.8, i === 0 ? 0.16 : 0.11, delay + i * beat, 0.35);
+      // horns crown the harmony where the score calls for them
+      if (b.horns) {
+        this.horn(this.freq(b.chord[0] - 12), bar * 0.96, war ? 0.055 : 0.045, delay, -0.25);
+        this.horn(this.freq(b.chord[2] - 12), bar * 0.96, war ? 0.045 : 0.035, delay + 0.03, 0.25);
+      }
+      // lute arpeggio dancing over the chord (the court's grace note)
+      if (!war) {
+        const arp = [0, 1, 2, 1];
+        for (let i = 0; i < 4; i++) {
+          this.pluck(this.freq(b.chord[arp[i]] + 12), 0.8, i === 0 ? 0.16 : 0.11, delay + i * beat, 0.35);
+        }
+      } else {
+        // war: an insistent ostinato on the root
+        for (let i = 0; i < 8; i++) {
+          this.pluck(this.freq(b.root), 0.4, i % 2 ? 0.1 : 0.16, delay + i * beat * 0.5, 0.2);
+        }
       }
       // the flute sings the melody, a lute doubling each phrase's attack
       let mt = delay;
       for (const [m, beats] of b.mel) {
         const d2 = beats * beat * 0.95;
-        this.flute(this.freq(m), d2, 0.055, mt);
+        this.flute(this.freq(m), d2, war ? 0.045 : 0.055, mt);
         this.pluck(this.freq(m), Math.min(1.1, d2), 0.1, mt, 0.2);
         mt += beats * beat;
       }
-      // war-drum on the strong beats
+      // drums: stately at court, doubled and heavy at war
       this.kick(delay, true);
-      this.kick(delay + beat * 2, false);
+      this.kick(delay + beat * 2, war);
+      if (b.drums >= 2) {
+        this.kick(delay + beat * 1.5, false);
+        this.kick(delay + beat * 3, true);
+        this.noise(0.05, 0.04, delay + beat, false);
+        this.noise(0.05, 0.05, delay + beat * 3.5, false);
+      }
       this.nextBar += bar;
       this.barI++;
     }

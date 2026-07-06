@@ -105,6 +105,18 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright');
   await page.waitForTimeout(350);
   await shot('shot-raid.png');
 
+  // the royal wedding interlude
+  await page.evaluate(() => {
+    Modal.close();
+    newGame(0, 1);
+    const extra = S.terr.find(t => t.owner === -1 && !t.sherwood);
+    extra.owner = 1; extra.castle = 1;
+    const r = acceptMarriage(1);
+    setScene(WeddingScene, 1, r);
+  });
+  await page.waitForTimeout(1400);
+  await shot('shot-wedding.png');
+
   await page.evaluate(() => { Modal.close(); setScene(EndScene, true); });
   await page.waitForTimeout(1200);
   await shot('shot-victory.png');

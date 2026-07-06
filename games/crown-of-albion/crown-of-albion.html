@@ -393,9 +393,9 @@ function buzz(ms) {
 const Sfx = {
   ac: null, master: null, wet: null, on: true, musicOn: true,
   nextBar: 0, barI: 0,
-  /* an 8-bar majestic progression in A minor: Am G F Am | Dm C E Am
-     each bar: bass root, a sustained triad pad, and a stately lead line */
-  prog: [
+  /* the court theme: an A section in A minor and a lifted B section that
+     turns toward the relative major, where the horns enter */
+  progA: [
     { root: 45, chord: [57, 60, 64], mel: [[76, 2], [72, 2]] },
     { root: 43, chord: [55, 59, 62], mel: [[74, 2], [71, 2]] },
     { root: 41, chord: [53, 57, 60], mel: [[72, 2], [69, 2]] },
@@ -405,28 +405,91 @@ const Sfx = {
     { root: 40, chord: [52, 56, 59], mel: [[71, 2], [68, 2]] },
     { root: 45, chord: [57, 60, 64], mel: [[69, 3], [71, 1]] },
   ],
+  progB: [
+    { root: 48, chord: [60, 64, 67], mel: [[79, 2], [76, 1], [77, 1]], horns: true },
+    { root: 43, chord: [55, 59, 62], mel: [[79, 1.5], [78, 0.5], [74, 2]], horns: true },
+    { root: 45, chord: [57, 60, 64], mel: [[76, 2], [72, 2]], horns: true },
+    { root: 41, chord: [53, 57, 60], mel: [[72, 1], [74, 1], [76, 2]], horns: true },
+    { root: 48, chord: [60, 64, 67], mel: [[79, 2], [81, 2]], horns: true },
+    { root: 43, chord: [55, 59, 62], mel: [[79, 2], [74, 2]], horns: true },
+    { root: 40, chord: [52, 56, 59], mel: [[76, 1.5], [74, 0.5], [71, 2]], horns: true },
+    { root: 45, chord: [57, 60, 64], mel: [[69, 4]], horns: true },
+  ],
+  /* the war theme: a grim, driving four bars under battles and sieges */
+  progWar: [
+    { root: 45, chord: [57, 60, 64], mel: [[69, 1], [69, 0.5], [72, 0.5], [69, 2]], horns: true, drums: 2 },
+    { root: 45, chord: [57, 60, 64], mel: [[74, 1.5], [72, 0.5], [69, 2]], drums: 2 },
+    { root: 41, chord: [53, 57, 60], mel: [[72, 1], [72, 0.5], [74, 0.5], [77, 2]], horns: true, drums: 2 },
+    { root: 40, chord: [52, 56, 59], mel: [[76, 2], [68, 2]], horns: true, drums: 2 },
+  ],
   ensure() {
     if (!this.ac) {
       try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
       const ac = this.ac;
+      // mastering chain: everything through a gentle bus compressor —
+      // it glues the ensemble and makes the mix read as produced
+      this.bus = ac.createGain();
+      this.bus.gain.value = 0.95;
+      let out = this.bus;
+      try {
+        const comp = ac.createDynamicsCompressor();
+        comp.threshold.value = -20;
+        comp.knee.value = 22;
+        comp.ratio.value = 4;
+        comp.attack.value = 0.008;
+        comp.release.value = 0.22;
+        this.bus.connect(comp);
+        out = comp;
+      } catch (e) { /* raw bus */ }
+      out.connect(ac.destination);
       this.master = ac.createGain();
       this.master.gain.value = 0.9;
-      this.master.connect(ac.destination);
+      this.master.connect(this.bus);
       // a generated hall reverb for cinematic space
       try {
-        const len = Math.floor(ac.sampleRate * 2.2);
+        const len = Math.floor(ac.sampleRate * 2.4);
         const imp = ac.createBuffer(2, len, ac.sampleRate);
         for (let ch = 0; ch < 2; ch++) {
           const d = imp.getChannelData(ch);
-          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
         }
         this.conv = ac.createConvolver(); this.conv.buffer = imp;
-        this.wet = ac.createGain(); this.wet.gain.value = 0.22;
-        this.master.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(ac.destination);
+        this.wet = ac.createGain(); this.wet.gain.value = 0.26;
+        this.master.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(this.bus);
       } catch (e) { /* no reverb */ }
       this.nextBar = ac.currentTime + 0.35;
+      this.initStreams();
     }
     if (this.ac.state === 'suspended') this.ac.resume();
+  },
+  /* real recorded music: drop looping orchestral tracks into music/ and
+     point these paths at them — they take over from the procedural score.
+     e.g. MUSIC: { court: 'music/theme-court.ogg', war: 'music/theme-war.ogg' } */
+  MUSIC: { court: '', war: '' },
+  initStreams() {
+    if (this.streams || typeof Audio === 'undefined') return;
+    this.streams = {};
+    for (const name of ['court', 'war']) {
+      const src = this.MUSIC[name];
+      if (!src) continue;
+      const entry = { el: null, ready: false };
+      this.streams[name] = entry;
+      try {
+        const a = new Audio(src);
+        a.loop = true;
+        a.volume = 0;
+        a.addEventListener('canplaythrough', () => { entry.el = a; entry.ready = true; }, { once: true });
+        a.addEventListener('error', () => { /* missing — the synth score plays */ });
+        a.load();
+      } catch (e) { /* no file */ }
+    }
+  },
+  theme: 'court',
+  setTheme(name) {
+    if (this.theme === name) return;
+    this.theme = name;
+    this.barI = 0;
+    if (this.ac) this.nextBar = this.ac.currentTime + 0.25;
   },
   freq(m) { return 440 * Math.pow(2, (m - 69) / 12); },
   /* one shaped voice with ADSR, routed through master (so it gets reverb) */
@@ -530,6 +593,51 @@ const Sfx = {
     lfo.start(t); lfo.stop(t + dur + 0.05);
     this.noise(Math.min(0.2, dur * 0.3), vol * 0.12, delay, true);
   },
+  /* a noble horn: saw + soft square through a swelling lowpass */
+  horn(f, dur, vol = 0.05, delay = 0, pan = 0) {
+    const ac = this.ac;
+    if (!ac || !this.on || !this.master) return;
+    const t = ac.currentTime + delay;
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(560, t);
+    lp.frequency.linearRampToValueAtTime(1350, t + Math.min(0.5, dur * 0.5));
+    lp.frequency.linearRampToValueAtTime(760, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.14);
+    g.gain.setValueAtTime(vol, t + Math.max(0.15, dur - 0.2));
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    lp.connect(g);
+    let tail = g;
+    if (ac.createStereoPanner) {
+      const pn = ac.createStereoPanner();
+      pn.pan.value = pan;
+      g.connect(pn);
+      tail = pn;
+    }
+    tail.connect(this.master);
+    for (const [type, det] of [['sawtooth', -4], ['square', 3]]) {
+      const o = ac.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      o.detune.setValueAtTime(det, t);
+      o.connect(lp);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  },
+  /* bells, harp run and horns for the wedding */
+  weddingSting() {
+    const run = [69, 72, 76, 79, 81, 84];
+    run.forEach((m, i) => this.pluck(this.freq(m), 1.4, 0.22, i * 0.09, 0.3));
+    const triad = [[64, 0], [67, 0.5], [72, 1.0], [76, 1.5]];
+    for (const [m, d] of triad) {
+      this.horn(this.freq(m), 1.6, 0.055, d, -0.2);
+      this.voice(this.freq(m + 12), 2.2, { type: 'sine', vol: 0.045, delay: d + 0.1, attack: 0.01 });
+    }
+    this.kick(0, true); this.kick(1.0, true);
+    for (let i = 0; i < 3; i++) this.pluck(this.freq(88), 2.4, 0.12, 1.6 + i * 0.5, 0);
+  },
   /* warm strings: detuned saws through a gentle lowpass, spread in stereo */
   pad(f, dur, delay = 0, pan = 0) {
     const ac = this.ac;
@@ -585,35 +693,78 @@ const Sfx = {
     this.kick(0, false); this.kick(0.9, false);
   },
   update() {
-    if (!this.ac || !this.on || !this.musicOn || !this.master) return;
-    const beat = 0.5, bar = beat * 4;
+    if (!this.ac || !this.on || !this.master) return;
+    // real recorded tracks take over whenever the player has provided them
+    if (this.streams) {
+      let usingStream = false;
+      for (const name of ['court', 'war']) {
+        const st = this.streams[name];
+        if (!st || !st.ready || !st.el) continue;
+        usingStream = true;
+        const active = this.musicOn && this.theme === name;
+        const target = active ? 0.55 : 0;
+        st.el.volume += (target - st.el.volume) * 0.06;
+        if (active && st.el.paused) st.el.play().catch(() => {});
+        if (!active && st.el.volume < 0.01 && !st.el.paused) st.el.pause();
+      }
+      if (usingStream) return;
+    }
+    if (!this.musicOn || this.theme === 'none') return;
+    const war = this.theme === 'war';
+    const beat = war ? 0.44 : 0.5, bar = beat * 4;
     while (this.nextBar < this.ac.currentTime + 0.7) {
       const delay = Math.max(0, this.nextBar - this.ac.currentTime);
-      const b = this.prog[this.barI % this.prog.length];
+      // court: A A B A across 8-bar sections; war: its own grim loop
+      let b;
+      if (war) {
+        b = this.progWar[this.barI % this.progWar.length];
+      } else {
+        const section = Math.floor(this.barI / 8) % 4;
+        const prog = section === 2 ? this.progB : this.progA;
+        b = prog[this.barI % 8];
+      }
       // plucked bass with a round sub underneath
       this.pluck(this.freq(b.root - 12), 1.6, 0.34, delay, -0.15);
       this.voice(this.freq(b.root - 24), beat * 1.9, { type: 'sine', vol: 0.06, attack: 0.03, delay });
-      this.pluck(this.freq(b.root - 5), 1.4, 0.22, delay + beat * 2, -0.15);
+      this.pluck(this.freq(b.root - (war ? 12 : 5)), 1.4, 0.22, delay + beat * 2, -0.15);
       // string pad carrying the chord, spread across the stage
       b.chord.forEach((m, i) => {
         this.pad(this.freq(m), bar * 1.02, delay, [-0.45, 0.1, 0.45][i % 3]);
       });
-      // lute arpeggio dancing over the chord
-      const arp = [0, 1, 2, 1];
-      for (let i = 0; i < 4; i++) {
-        this.pluck(this.freq(b.chord[arp[i]] + 12), 0.8, i === 0 ? 0.16 : 0.11, delay + i * beat, 0.35);
+      // horns crown the harmony where the score calls for them
+      if (b.horns) {
+        this.horn(this.freq(b.chord[0] - 12), bar * 0.96, war ? 0.055 : 0.045, delay, -0.25);
+        this.horn(this.freq(b.chord[2] - 12), bar * 0.96, war ? 0.045 : 0.035, delay + 0.03, 0.25);
+      }
+      // lute arpeggio dancing over the chord (the court's grace note)
+      if (!war) {
+        const arp = [0, 1, 2, 1];
+        for (let i = 0; i < 4; i++) {
+          this.pluck(this.freq(b.chord[arp[i]] + 12), 0.8, i === 0 ? 0.16 : 0.11, delay + i * beat, 0.35);
+        }
+      } else {
+        // war: an insistent ostinato on the root
+        for (let i = 0; i < 8; i++) {
+          this.pluck(this.freq(b.root), 0.4, i % 2 ? 0.1 : 0.16, delay + i * beat * 0.5, 0.2);
+        }
       }
       // the flute sings the melody, a lute doubling each phrase's attack
       let mt = delay;
       for (const [m, beats] of b.mel) {
         const d2 = beats * beat * 0.95;
-        this.flute(this.freq(m), d2, 0.055, mt);
+        this.flute(this.freq(m), d2, war ? 0.045 : 0.055, mt);
         this.pluck(this.freq(m), Math.min(1.1, d2), 0.1, mt, 0.2);
         mt += beats * beat;
       }
-      // war-drum on the strong beats
+      // drums: stately at court, doubled and heavy at war
       this.kick(delay, true);
-      this.kick(delay + beat * 2, false);
+      this.kick(delay + beat * 2, war);
+      if (b.drums >= 2) {
+        this.kick(delay + beat * 1.5, false);
+        this.kick(delay + beat * 3, true);
+        this.noise(0.05, 0.04, delay + beat, false);
+        this.noise(0.05, 0.05, delay + beat * 3.5, false);
+      }
       this.nextBar += bar;
       this.barI++;
     }
@@ -977,9 +1128,9 @@ const HEROES = [
 ];
 
 const AI_LORDS = [
-  { name: 'Lord Bran the Black',  color: '#34548f', joust: 7, blade: 6, lead: 6 },
-  { name: 'Duke Osric of Anglia', color: '#3e7c3a', joust: 6, blade: 7, lead: 5 },
-  { name: 'Baron Hadwin the Grim', color: '#6b4a9e', joust: 5, blade: 5, lead: 8 },
+  { name: 'Lord Bran the Black',  color: '#34548f', joust: 7, blade: 6, lead: 6, kin: 'Lady Sigrid' },
+  { name: 'Duke Osric of Anglia', color: '#3e7c3a', joust: 6, blade: 7, lead: 5, kin: 'Lady Elswyth' },
+  { name: 'Baron Hadwin the Grim', color: '#6b4a9e', joust: 5, blade: 5, lead: 8, kin: 'Lady Rohese' },
 ];
 
 const PLAYER_COLOR = '#b3372c';
@@ -1335,7 +1486,8 @@ function newGame(heroIdx, diff) {
     terr[ti].castle = 1;
     terr[ti].income += 4;
   });
-  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, sherwoodReadyAt: 0, log: [] };
+  S = { month: 2, year: 1191, diff, lords, terr, actionUsed: false, sherwoodReadyAt: 0,
+    marriage: { to: -1, kin: '' }, truce: {}, log: [] };
   MapGen.repaint();
   saveGame();
 }
@@ -1408,6 +1560,41 @@ function grantRobinAid(score) {
   saveGame();
   return { men, knights, gold, rival };
 }
+
+/* ---------------- marriage alliances ---------------- */
+/* houses offer their kin's hand when your renown is high — the weaker the
+   house, the keener the match. returns the offering lord, or null */
+function rollMarriageOffer() {
+  if (!S.marriage || S.marriage.to >= 0) return null;
+  if (player().fame < 20) return null;
+  const cands = S.lords.filter(l => !l.isPlayer && l.alive && lordTerrs(l.id).length > 0);
+  if (!cands.length) return null;
+  const l = pick(cands);
+  let chance = 0.08;
+  if (lordTerrs(l.id).length <= 2) chance += 0.18;        // a desperate house seeks protection
+  if (player().fame >= 40) chance += 0.08;                // renown draws suitors
+  return Math.random() < chance ? l : null;
+}
+/* wed into a house: their castled provinces (all but the home seat) pass to
+   you as dowry, a bride-price of gold if there are none, and peace follows */
+function acceptMarriage(li) {
+  const l = S.lords[li];
+  const kin = AI_LORDS[li - 1].kin;
+  const holdings = lordTerrs(li);
+  let dowry = holdings.filter(t => t.castle > 0 && t.id !== HOME_TERRS[li]);
+  if (!dowry.length) dowry = holdings.filter(t => t.id !== HOME_TERRS[li]).slice(0, 1);
+  for (const t of dowry) t.owner = 0;
+  let gold = 0;
+  if (!dowry.length) { gold = Math.min(l.gold, 60); l.gold -= gold; player().gold += gold; }
+  player().fame += 12;
+  S.marriage = { to: li, kin };
+  S.truce[li] = monthAbs() + 8;
+  MapGen.repaint();
+  validateHosts();
+  saveGame();
+  return { dowry, gold, kin };
+}
+function truceWith(li) { return S.truce && S.truce[li] > monthAbs(); }
 
 /* ---------------- battle resolution (shared with AI) ---------------- */
 /* returns rounds for animation + outcome; mutates nothing */
@@ -1497,7 +1684,9 @@ function aiTakeTurn(l) {
   const diff = DIFFS[S.diff];
   // shopping
   let budget = l.gold * 0.8;
-  const myTargets = targetsFor(l.id).map(i => S.terr[i]);
+  // a wedding truce bars this house from striking the player's lands
+  const myTargets = targetsFor(l.id).map(i => S.terr[i])
+    .filter(t => !(t.owner === 0 && truceWith(l.id)));
   const wantCat = myTargets.some(t => t.castle > 0) && l.army.c < 2;
   if (wantCat && budget >= COSTS.catapult && Math.random() < 0.5) {
     l.gold -= COSTS.catapult; budget -= COSTS.catapult; l.army.c++;
@@ -1607,6 +1796,8 @@ function loadGame() {
     S = JSON.parse(raw);
     // older saves predate stationed hosts — give each host a home
     for (const l of S.lords) if (l.army.loc === undefined) l.army.loc = -1;
+    if (!S.marriage) S.marriage = { to: -1, kin: '' };
+    if (!S.truce) S.truce = {};
     validateHosts();
     MapGen.repaint();
     return true;
@@ -2117,6 +2308,7 @@ const TitleScene = {
   enter() {
     this.stars = Array.from({ length: 90 }, () => ({ x: rnd(W), y: rnd(620), r: rnd(0.6, 2), p: rnd(TAU) }));
     this.buttons = [];
+    Sfx.setTheme('court');
   },
   layoutButtons() {
     this.buttons = [];
@@ -2568,6 +2760,7 @@ const MapScene = {
     this.recruitOpen = false;
     this.aiQueue = null;
     this.cam = { fx: 360, fy: 620, scale: 1.04 };
+    Sfx.setTheme('court');
   },
 
   /* camera: a slow Ken-Burns drift that eases to focus a selected province */
@@ -2612,6 +2805,26 @@ const MapScene = {
     if (playerLost()) { setScene(EndScene, false); return; }
     toast(`${dateStr()} — taxes bring ${player().lastIncome} gold`, '#ffe9a0');
     Sfx.coin();
+    // a proposal of marriage takes precedence over lesser tidings
+    const suitor = rollMarriageOffer();
+    if (suitor) {
+      const kin = AI_LORDS[suitor.id - 1].kin;
+      Modal.show({
+        title: 'A Proposal of Marriage',
+        lines: [
+          `An envoy arrives under a white banner: ${suitor.name} offers the hand of ${kin} of his house.`,
+          'The dowry: the castled holdings of their family, and peace between your houses.',
+        ],
+        buttons: [
+          { label: 'Accept the Match', color: '#6b2a4a', fn: () => {
+            const r = acceptMarriage(suitor.id);
+            setScene(WeddingScene, suitor.id, r);
+          } },
+          { label: 'Refuse Politely', fn: () => toast('The envoy departs with cold courtesy.') },
+        ],
+      });
+      return;
+    }
     const ev = rollEvent();
     if (ev) {
       Modal.show({ title: ev.title, lines: ev.text(), buttons: [{ label: 'So Be It', fn: () => ev.apply() }] });
@@ -3048,7 +3261,8 @@ const MapScene = {
     ctx.fillStyle = p.color;
     roundRect(24, 20, 14, 78, 5); ctx.fill();
     textShadow(p.name, 52, 36, 26, '#f5e9c8', 'left');
-    text(dateStr(), 52, 68, 21, '#cbbf9f', 'left');
+    const wed = S.marriage && S.marriage.to >= 0 ? `  ·  ♥ ${S.marriage.kin}` : '';
+    text(dateStr() + wed, 52, 68, 21, '#cbbf9f', 'left');
     const provs = lordTerrs(0).length;
     const totalProvs = S.terr.filter(t => !t.sherwood).length;
     const hostName = (p.army.loc >= 0 && S.terr[p.army.loc]) ? S.terr[p.army.loc].name : '—';
@@ -3244,6 +3458,7 @@ const MapScene = {
 /* ---------------- field battle ---------------- */
 const BattleScene = {
   enter(ti, breach) {
+    Sfx.setTheme('war');
     this.t = S.terr[ti];
     this.terrain = TERR_DEFS[ti].sherwood ? 'forest' : TERR_DEFS[ti].terrain;
     this.breach = breach;
@@ -3789,6 +4004,7 @@ const JoustScene = {
 /* ---------------- the siege ---------------- */
 const SiegeScene = {
   enter(ti) {
+    Sfx.setTheme('war');
     this.ti = ti;
     this.t = S.terr[ti];
     this.segs = [{ hp: 2 }, { hp: 2 }, { hp: 2 }];
@@ -4058,6 +4274,7 @@ const SiegeScene = {
 /* ---------------- the night raid ---------------- */
 const RaidScene = {
   enter(foe) {
+    Sfx.setTheme('war');
     this.foe = foe;
     this.php = 3;
     this.ehp = 3;
@@ -4366,6 +4583,188 @@ const ArcheryScene = {
     if (this.phase === 'aim') textShadow('Tap to loose!', W / 2, 1200, 32, '#ffe9a0');
   },
   onTap() { if (this.phase === 'aim') this.loose(); },
+};
+
+/* ---------------- a royal wedding (painted interlude) ---------------- */
+const WeddingScene = {
+  enter(li, result) {
+    this.lord = S.lords[li];
+    this.result = result || { dowry: [], gold: 0, kin: S.marriage.kin };
+    this.t = 0;
+    Sfx.setTheme('none');
+    Sfx.weddingSting();
+    buzz(60);
+  },
+  update(dt) {
+    this.t += dt;
+    // rose petals drifting down through the hall
+    if (Math.random() < 0.35) {
+      spawn(rnd(80, W - 80), -10, {
+        vx: rnd(-24, 24), vy: rnd(28, 60), g: 6, life: rnd(4, 7),
+        size: rnd(3, 5.5), color: pick(['#e8a8b8', '#f4cfd8', '#fff0e8', '#d88a9a']),
+        shrink: false,
+      });
+    }
+  },
+  render() {
+    figSheen = 0.1;
+    // candle-lit great hall
+    const wall = ctx.createLinearGradient(0, 0, 0, H);
+    wall.addColorStop(0, '#1c1210');
+    wall.addColorStop(0.45, '#3a2618');
+    wall.addColorStop(1, '#241610');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, W, H);
+    // stone coursing
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 2;
+    for (let y = 60; y < 760; y += 46) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      for (let x = (y / 46 % 2) * 60; x < W; x += 120) {
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 46); ctx.stroke();
+      }
+    }
+    // the great window: pointed arch of glowing stained glass
+    const wx = W / 2, wtop = 96, wbot = 560, ww = 150;
+    glow(wx, 330, 320, 'rgba(255,190,110,0.35)', 0.8);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(wx - ww, wbot);
+    ctx.lineTo(wx - ww, 260);
+    ctx.quadraticCurveTo(wx - ww, wtop, wx, wtop - 18);
+    ctx.quadraticCurveTo(wx + ww, wtop, wx + ww, 260);
+    ctx.lineTo(wx + ww, wbot);
+    ctx.closePath();
+    ctx.clip();
+    const glass = ['#c8563e', '#3f74b8', '#d8a83e', '#4d8a48', '#7a4a9e', '#c87898'];
+    const rg = mulberry32(41);
+    for (let gy = wtop - 20; gy < wbot; gy += 44) {
+      for (let gx = wx - ww; gx < wx + ww; gx += 40) {
+        ctx.fillStyle = glass[Math.floor(rg() * glass.length)];
+        ctx.globalAlpha = 0.75 + 0.25 * Math.sin(gTime * 1.5 + gx * 0.1 + gy * 0.07);
+        ctx.beginPath();
+        ctx.moveTo(gx + 20, gy); ctx.lineTo(gx + 40, gy + 22); ctx.lineTo(gx + 20, gy + 44); ctx.lineTo(gx, gy + 22);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.strokeStyle = '#191008';
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(wx - ww, wbot); ctx.lineTo(wx - ww, 260);
+    ctx.quadraticCurveTo(wx - ww, wtop, wx, wtop - 18);
+    ctx.quadraticCurveTo(wx + ww, wtop, wx + ww, 260);
+    ctx.lineTo(wx + ww, wbot);
+    ctx.stroke();
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(wx, wtop - 10); ctx.lineTo(wx, wbot); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx - ww, 330); ctx.lineTo(wx + ww, 330); ctx.stroke();
+    // the two houses' banners flanking the window
+    for (const [bx, col] of [[110, player().color], [W - 110, this.lord.color]]) {
+      const wv = Math.sin(gTime * 1.6 + bx) * 5;
+      const bg2 = ctx.createLinearGradient(bx - 55, 0, bx + 55, 0);
+      bg2.addColorStop(0, shade(col, 0.18));
+      bg2.addColorStop(1, shade(col, -0.4));
+      ctx.fillStyle = bg2;
+      ctx.beginPath();
+      ctx.moveTo(bx - 55, 130); ctx.lineTo(bx + 55, 130);
+      ctx.lineTo(bx + 55 + wv, 470); ctx.lineTo(bx + wv, 420); ctx.lineTo(bx - 55 + wv, 470);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#c9a44a'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = 'rgba(245,235,205,0.9)';
+      ctx.fillRect(bx - 5, 160, 10, 200);
+      ctx.fillRect(bx - 38, 240, 76, 10);
+    }
+    // torch glows and flame sparks
+    for (const tx of [58, W - 58]) {
+      glow(tx, 620, 190, 'rgba(255,160,70,0.5)', 0.6 + 0.1 * Math.sin(gTime * 7 + tx));
+      ctx.fillStyle = '#3a2c1c'; ctx.fillRect(tx - 5, 600, 10, 62);
+      const fl = Math.sin(gTime * 9 + tx) * 4;
+      ctx.fillStyle = '#ff9a30';
+      ctx.beginPath(); ctx.ellipse(tx, 588 + fl * 0.3, 10, 20 + fl, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffd75e';
+      ctx.beginPath(); ctx.ellipse(tx, 595 + fl * 0.3, 5, 10, 0, 0, TAU); ctx.fill();
+    }
+    // dais floor
+    const fl = ctx.createLinearGradient(0, 760, 0, H);
+    fl.addColorStop(0, '#4a3420');
+    fl.addColorStop(1, '#2a1c10');
+    ctx.fillStyle = fl;
+    ctx.fillRect(0, 760, W, H - 760);
+    ctx.fillStyle = 'rgba(180,50,60,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(wx - 130, 760); ctx.lineTo(wx + 130, 760); ctx.lineTo(wx + 200, H); ctx.lineTo(wx - 200, H);
+    ctx.closePath(); ctx.fill();
+    // the couple, hand in hand before the window
+    const sway = Math.sin(gTime * 1.2) * 2;
+    ctx.save();
+    ctx.translate(wx - 62, 952 + sway * 0.4);
+    const gc = player().color;
+    const gg = ctx.createLinearGradient(-34, -180, 34, 40);
+    gg.addColorStop(0, shade(gc, 0.22)); gg.addColorStop(1, shade(gc, -0.45));
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.moveTo(-36, 40); ctx.quadraticCurveTo(-40, -120, -16, -158);
+    ctx.lineTo(16, -158); ctx.quadraticCurveTo(40, -120, 36, 40);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(-30, -66, 60, 9);
+    ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(0, -178, 19, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(90,55,30,0.4)'; ctx.beginPath(); ctx.arc(0, -172, 19, 0.3, Math.PI - 0.3); ctx.fill();
+    ctx.fillStyle = '#4a3018';
+    ctx.beginPath(); ctx.arc(0, -184, 19, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+    drawCrown(0, -206, 12);
+    ctx.strokeStyle = shade(gc, 0.1); ctx.lineWidth = 12; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(26, -130); ctx.quadraticCurveTo(52, -100, 62, -74); ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(wx + 62, 952 + sway * -0.4);
+    const bc = this.lord.color;
+    const bg3 = ctx.createLinearGradient(-34, -180, 34, 40);
+    bg3.addColorStop(0, '#f2ead8'); bg3.addColorStop(1, '#b8a890');
+    ctx.fillStyle = bg3;
+    ctx.beginPath();
+    ctx.moveTo(-40, 40); ctx.quadraticCurveTo(-38, -110, -14, -156);
+    ctx.lineTo(14, -156); ctx.quadraticCurveTo(38, -110, 40, 40);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = shade(bc, 0.1);
+    ctx.fillRect(-30, -110, 60, 12);
+    ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(0, -176, 17, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7a4a22';
+    ctx.beginPath(); ctx.arc(0, -182, 17, Math.PI * 0.9, Math.PI * 2.1); ctx.fill();
+    // veil
+    ctx.fillStyle = 'rgba(255,250,240,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(-18, -190); ctx.quadraticCurveTo(0, -202, 18, -190);
+    ctx.lineTo(26, -80); ctx.lineTo(-26, -80);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e2c26a';
+    ctx.beginPath(); ctx.arc(0, -196, 5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#e8dcc8'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-24, -128); ctx.quadraticCurveTo(-50, -100, -62, -74); ctx.stroke();
+    ctx.restore();
+    // clasped hands
+    ctx.fillStyle = SKIN;
+    ctx.beginPath(); ctx.arc(wx, 880 + sway * 0.1, 10, 0, TAU); ctx.fill();
+    vignette(0.5);
+    letterbox(easeOut(clamp(this.t * 2, 0, 1)) * 0.6);
+    titleText('A Royal Wedding', W / 2, 618, 52);
+    const kin = this.result.kin || S.marriage.kin;
+    text(`${player().name} weds ${kin} of the house of ${this.lord.name}`, W / 2, 668, 24, '#ead9b8');
+    let dowryLine;
+    if (this.result.dowry.length) {
+      dowryLine = `Dowry: ${this.result.dowry.map(t => t.name).join(', ')} pass${this.result.dowry.length === 1 ? 'es' : ''} to your banner.`;
+    } else {
+      dowryLine = `Dowry: ${this.result.gold} gold — and the friendship of a proud house.`;
+    }
+    text(dowryLine, W / 2, 1130, 22, '#ffe9a0');
+    text('Peace is sworn between your houses. Tap to join the feast.', W / 2, 1168, 20, 'rgba(220,205,170,0.8)');
+  },
+  onTap() {
+    Sfx.fanfare();
+    if (playerWon()) setScene(EndScene, true);
+    else setScene(MapScene);
+  },
 };
 
 /* ---------------- victory / defeat ---------------- */

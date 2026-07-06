@@ -494,6 +494,7 @@ const TitleScene = {
   enter() {
     this.stars = Array.from({ length: 90 }, () => ({ x: rnd(W), y: rnd(620), r: rnd(0.6, 2), p: rnd(TAU) }));
     this.buttons = [];
+    Sfx.setTheme('court');
   },
   layoutButtons() {
     this.buttons = [];
@@ -945,6 +946,7 @@ const MapScene = {
     this.recruitOpen = false;
     this.aiQueue = null;
     this.cam = { fx: 360, fy: 620, scale: 1.04 };
+    Sfx.setTheme('court');
   },
 
   /* camera: a slow Ken-Burns drift that eases to focus a selected province */
@@ -989,6 +991,26 @@ const MapScene = {
     if (playerLost()) { setScene(EndScene, false); return; }
     toast(`${dateStr()} — taxes bring ${player().lastIncome} gold`, '#ffe9a0');
     Sfx.coin();
+    // a proposal of marriage takes precedence over lesser tidings
+    const suitor = rollMarriageOffer();
+    if (suitor) {
+      const kin = AI_LORDS[suitor.id - 1].kin;
+      Modal.show({
+        title: 'A Proposal of Marriage',
+        lines: [
+          `An envoy arrives under a white banner: ${suitor.name} offers the hand of ${kin} of his house.`,
+          'The dowry: the castled holdings of their family, and peace between your houses.',
+        ],
+        buttons: [
+          { label: 'Accept the Match', color: '#6b2a4a', fn: () => {
+            const r = acceptMarriage(suitor.id);
+            setScene(WeddingScene, suitor.id, r);
+          } },
+          { label: 'Refuse Politely', fn: () => toast('The envoy departs with cold courtesy.') },
+        ],
+      });
+      return;
+    }
     const ev = rollEvent();
     if (ev) {
       Modal.show({ title: ev.title, lines: ev.text(), buttons: [{ label: 'So Be It', fn: () => ev.apply() }] });
@@ -1425,7 +1447,8 @@ const MapScene = {
     ctx.fillStyle = p.color;
     roundRect(24, 20, 14, 78, 5); ctx.fill();
     textShadow(p.name, 52, 36, 26, '#f5e9c8', 'left');
-    text(dateStr(), 52, 68, 21, '#cbbf9f', 'left');
+    const wed = S.marriage && S.marriage.to >= 0 ? `  ·  ♥ ${S.marriage.kin}` : '';
+    text(dateStr() + wed, 52, 68, 21, '#cbbf9f', 'left');
     const provs = lordTerrs(0).length;
     const totalProvs = S.terr.filter(t => !t.sherwood).length;
     const hostName = (p.army.loc >= 0 && S.terr[p.army.loc]) ? S.terr[p.army.loc].name : '—';
@@ -1621,6 +1644,7 @@ const MapScene = {
 /* ---------------- field battle ---------------- */
 const BattleScene = {
   enter(ti, breach) {
+    Sfx.setTheme('war');
     this.t = S.terr[ti];
     this.terrain = TERR_DEFS[ti].sherwood ? 'forest' : TERR_DEFS[ti].terrain;
     this.breach = breach;
@@ -2166,6 +2190,7 @@ const JoustScene = {
 /* ---------------- the siege ---------------- */
 const SiegeScene = {
   enter(ti) {
+    Sfx.setTheme('war');
     this.ti = ti;
     this.t = S.terr[ti];
     this.segs = [{ hp: 2 }, { hp: 2 }, { hp: 2 }];
@@ -2435,6 +2460,7 @@ const SiegeScene = {
 /* ---------------- the night raid ---------------- */
 const RaidScene = {
   enter(foe) {
+    Sfx.setTheme('war');
     this.foe = foe;
     this.php = 3;
     this.ehp = 3;
@@ -2743,6 +2769,188 @@ const ArcheryScene = {
     if (this.phase === 'aim') textShadow('Tap to loose!', W / 2, 1200, 32, '#ffe9a0');
   },
   onTap() { if (this.phase === 'aim') this.loose(); },
+};
+
+/* ---------------- a royal wedding (painted interlude) ---------------- */
+const WeddingScene = {
+  enter(li, result) {
+    this.lord = S.lords[li];
+    this.result = result || { dowry: [], gold: 0, kin: S.marriage.kin };
+    this.t = 0;
+    Sfx.setTheme('none');
+    Sfx.weddingSting();
+    buzz(60);
+  },
+  update(dt) {
+    this.t += dt;
+    // rose petals drifting down through the hall
+    if (Math.random() < 0.35) {
+      spawn(rnd(80, W - 80), -10, {
+        vx: rnd(-24, 24), vy: rnd(28, 60), g: 6, life: rnd(4, 7),
+        size: rnd(3, 5.5), color: pick(['#e8a8b8', '#f4cfd8', '#fff0e8', '#d88a9a']),
+        shrink: false,
+      });
+    }
+  },
+  render() {
+    figSheen = 0.1;
+    // candle-lit great hall
+    const wall = ctx.createLinearGradient(0, 0, 0, H);
+    wall.addColorStop(0, '#1c1210');
+    wall.addColorStop(0.45, '#3a2618');
+    wall.addColorStop(1, '#241610');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, W, H);
+    // stone coursing
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 2;
+    for (let y = 60; y < 760; y += 46) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      for (let x = (y / 46 % 2) * 60; x < W; x += 120) {
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 46); ctx.stroke();
+      }
+    }
+    // the great window: pointed arch of glowing stained glass
+    const wx = W / 2, wtop = 96, wbot = 560, ww = 150;
+    glow(wx, 330, 320, 'rgba(255,190,110,0.35)', 0.8);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(wx - ww, wbot);
+    ctx.lineTo(wx - ww, 260);
+    ctx.quadraticCurveTo(wx - ww, wtop, wx, wtop - 18);
+    ctx.quadraticCurveTo(wx + ww, wtop, wx + ww, 260);
+    ctx.lineTo(wx + ww, wbot);
+    ctx.closePath();
+    ctx.clip();
+    const glass = ['#c8563e', '#3f74b8', '#d8a83e', '#4d8a48', '#7a4a9e', '#c87898'];
+    const rg = mulberry32(41);
+    for (let gy = wtop - 20; gy < wbot; gy += 44) {
+      for (let gx = wx - ww; gx < wx + ww; gx += 40) {
+        ctx.fillStyle = glass[Math.floor(rg() * glass.length)];
+        ctx.globalAlpha = 0.75 + 0.25 * Math.sin(gTime * 1.5 + gx * 0.1 + gy * 0.07);
+        ctx.beginPath();
+        ctx.moveTo(gx + 20, gy); ctx.lineTo(gx + 40, gy + 22); ctx.lineTo(gx + 20, gy + 44); ctx.lineTo(gx, gy + 22);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.strokeStyle = '#191008';
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(wx - ww, wbot); ctx.lineTo(wx - ww, 260);
+    ctx.quadraticCurveTo(wx - ww, wtop, wx, wtop - 18);
+    ctx.quadraticCurveTo(wx + ww, wtop, wx + ww, 260);
+    ctx.lineTo(wx + ww, wbot);
+    ctx.stroke();
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(wx, wtop - 10); ctx.lineTo(wx, wbot); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx - ww, 330); ctx.lineTo(wx + ww, 330); ctx.stroke();
+    // the two houses' banners flanking the window
+    for (const [bx, col] of [[110, player().color], [W - 110, this.lord.color]]) {
+      const wv = Math.sin(gTime * 1.6 + bx) * 5;
+      const bg2 = ctx.createLinearGradient(bx - 55, 0, bx + 55, 0);
+      bg2.addColorStop(0, shade(col, 0.18));
+      bg2.addColorStop(1, shade(col, -0.4));
+      ctx.fillStyle = bg2;
+      ctx.beginPath();
+      ctx.moveTo(bx - 55, 130); ctx.lineTo(bx + 55, 130);
+      ctx.lineTo(bx + 55 + wv, 470); ctx.lineTo(bx + wv, 420); ctx.lineTo(bx - 55 + wv, 470);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#c9a44a'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = 'rgba(245,235,205,0.9)';
+      ctx.fillRect(bx - 5, 160, 10, 200);
+      ctx.fillRect(bx - 38, 240, 76, 10);
+    }
+    // torch glows and flame sparks
+    for (const tx of [58, W - 58]) {
+      glow(tx, 620, 190, 'rgba(255,160,70,0.5)', 0.6 + 0.1 * Math.sin(gTime * 7 + tx));
+      ctx.fillStyle = '#3a2c1c'; ctx.fillRect(tx - 5, 600, 10, 62);
+      const fl = Math.sin(gTime * 9 + tx) * 4;
+      ctx.fillStyle = '#ff9a30';
+      ctx.beginPath(); ctx.ellipse(tx, 588 + fl * 0.3, 10, 20 + fl, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffd75e';
+      ctx.beginPath(); ctx.ellipse(tx, 595 + fl * 0.3, 5, 10, 0, 0, TAU); ctx.fill();
+    }
+    // dais floor
+    const fl = ctx.createLinearGradient(0, 760, 0, H);
+    fl.addColorStop(0, '#4a3420');
+    fl.addColorStop(1, '#2a1c10');
+    ctx.fillStyle = fl;
+    ctx.fillRect(0, 760, W, H - 760);
+    ctx.fillStyle = 'rgba(180,50,60,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(wx - 130, 760); ctx.lineTo(wx + 130, 760); ctx.lineTo(wx + 200, H); ctx.lineTo(wx - 200, H);
+    ctx.closePath(); ctx.fill();
+    // the couple, hand in hand before the window
+    const sway = Math.sin(gTime * 1.2) * 2;
+    ctx.save();
+    ctx.translate(wx - 62, 952 + sway * 0.4);
+    const gc = player().color;
+    const gg = ctx.createLinearGradient(-34, -180, 34, 40);
+    gg.addColorStop(0, shade(gc, 0.22)); gg.addColorStop(1, shade(gc, -0.45));
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.moveTo(-36, 40); ctx.quadraticCurveTo(-40, -120, -16, -158);
+    ctx.lineTo(16, -158); ctx.quadraticCurveTo(40, -120, 36, 40);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(-30, -66, 60, 9);
+    ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(0, -178, 19, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(90,55,30,0.4)'; ctx.beginPath(); ctx.arc(0, -172, 19, 0.3, Math.PI - 0.3); ctx.fill();
+    ctx.fillStyle = '#4a3018';
+    ctx.beginPath(); ctx.arc(0, -184, 19, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+    drawCrown(0, -206, 12);
+    ctx.strokeStyle = shade(gc, 0.1); ctx.lineWidth = 12; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(26, -130); ctx.quadraticCurveTo(52, -100, 62, -74); ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(wx + 62, 952 + sway * -0.4);
+    const bc = this.lord.color;
+    const bg3 = ctx.createLinearGradient(-34, -180, 34, 40);
+    bg3.addColorStop(0, '#f2ead8'); bg3.addColorStop(1, '#b8a890');
+    ctx.fillStyle = bg3;
+    ctx.beginPath();
+    ctx.moveTo(-40, 40); ctx.quadraticCurveTo(-38, -110, -14, -156);
+    ctx.lineTo(14, -156); ctx.quadraticCurveTo(38, -110, 40, 40);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = shade(bc, 0.1);
+    ctx.fillRect(-30, -110, 60, 12);
+    ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(0, -176, 17, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7a4a22';
+    ctx.beginPath(); ctx.arc(0, -182, 17, Math.PI * 0.9, Math.PI * 2.1); ctx.fill();
+    // veil
+    ctx.fillStyle = 'rgba(255,250,240,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(-18, -190); ctx.quadraticCurveTo(0, -202, 18, -190);
+    ctx.lineTo(26, -80); ctx.lineTo(-26, -80);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e2c26a';
+    ctx.beginPath(); ctx.arc(0, -196, 5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#e8dcc8'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-24, -128); ctx.quadraticCurveTo(-50, -100, -62, -74); ctx.stroke();
+    ctx.restore();
+    // clasped hands
+    ctx.fillStyle = SKIN;
+    ctx.beginPath(); ctx.arc(wx, 880 + sway * 0.1, 10, 0, TAU); ctx.fill();
+    vignette(0.5);
+    letterbox(easeOut(clamp(this.t * 2, 0, 1)) * 0.6);
+    titleText('A Royal Wedding', W / 2, 618, 52);
+    const kin = this.result.kin || S.marriage.kin;
+    text(`${player().name} weds ${kin} of the house of ${this.lord.name}`, W / 2, 668, 24, '#ead9b8');
+    let dowryLine;
+    if (this.result.dowry.length) {
+      dowryLine = `Dowry: ${this.result.dowry.map(t => t.name).join(', ')} pass${this.result.dowry.length === 1 ? 'es' : ''} to your banner.`;
+    } else {
+      dowryLine = `Dowry: ${this.result.gold} gold — and the friendship of a proud house.`;
+    }
+    text(dowryLine, W / 2, 1130, 22, '#ffe9a0');
+    text('Peace is sworn between your houses. Tap to join the feast.', W / 2, 1168, 20, 'rgba(220,205,170,0.8)');
+  },
+  onTap() {
+    Sfx.fanfare();
+    if (playerWon()) setScene(EndScene, true);
+    else setScene(MapScene);
+  },
 };
 
 /* ---------------- victory / defeat ---------------- */
